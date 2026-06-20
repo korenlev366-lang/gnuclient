@@ -1,0 +1,531 @@
+package gnu.client.module.modules.combat;
+
+import gnu.client.module.Category;
+import gnu.client.module.Module;
+import gnu.client.module.ModuleManager;
+import gnu.client.module.setting.BoolSetting;
+import gnu.client.module.setting.SliderSetting;
+import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.packet.OutboundLagQueue;
+import gnu.client.runtime.packet.PacketHelper;
+import gnu.client.runtime.packet.PacketUtil;
+import java.util.function.Consumer;
+
+/**
+ * Auto Block — holds right-click (use item) to block with a sword when a
+ * valid target is in range while LMB is held. Full port from raven-bS
+ * {@code Autoblock}.
+ *
+ * <p>Blocking uses keybind approach with {@link McAccess#pressUseItemKeyOnce}:
+ * both {@link McAccess#setUseItemKeyState}(true) and
+ * {@code pressUseItemKeyOnce()} are called. The latter is required because
+ * the game's {@code rightClickMouse()} path checks {@code isPressed()},
+ * which requires {@code pressTime > 0} from {@code onTick}. Without it,
+ * C08 is never sent and Grim flags Post(player digging) from stale C07
+ * RELEASE_USE_ITEM packets.
+ *
+ * <p>Lag (Slinky-style): When hold time expires, the lag starts FIRST
+ * (matching raven-bS order), then the sword unblocks on the client (blink).
+ * During the lag window, C08s do NOT flow — the !isLagging guard prevents
+ * re-blocking. The server's isUsingItem=true persists naturally for 24
+ * minutes from the pre-lag C08 (itemInUseCount = 72000 ticks). Attack
+ * within ~200ms → server still has isUsingItem=true → reduced damage.
+ *
+ * <p>When a C02 attack fires during lag (or not lagging), the module
+ * re-blocks on the next tick via {@code reblockPendingTick}. This 1-tick defer
+ * prevents Grim Multiaction A flags: field_78781_i (blockHitDelay) only controls
+ * block-breaking delay, NOT item use — verified via bytecode on
+ * PlayerControllerMP.func_78769_a. Without the defer, C02 + C08 in the same
+ * server tick causes flags.
+ *
+ * <p>The module also cancels right-click mouse events via
+ * {@link gnu.client.runtime.ClientEventListener} to prevent vanilla
+ * interaction from interfering with autoblock state.
+ */
+public final class AutoBlockModule extends Module implements gnu.client.runtime.packet.PacketListener {
+
+    // ── Settings ──────────────────────────────────────────────────────────
+
+    private final SliderSetting range = addSetting(
+            new SliderSetting("Range", 4.0f, 2.0f, 6.0f));
+    private final SliderSetting maxHurtTimeMs = addSetting(
+            new SliderSetting("Max Hurt Time", 200.0f, 50.0f, 500.0f));
+    private final SliderSetting maxHoldMs = addSetting(
+            new SliderSetting("Max Hold Time", 150.0f, 50.0f, 500.0f));
+
+    private final BoolSetting requireLmb = addSetting(
+            new BoolSetting("Require LMB", true));
+    private final BoolSetting requireRmb = addSetting(
+            new BoolSetting("Require RMB", false));
+    private final BoolSetting onlyWhenDamaged = addSetting(
+            new BoolSetting("Only when damaged", false));
+    private final BoolSetting ignoreTeammates = addSetting(
+            new BoolSetting("Ignore teammates", true));
+
+    private final SliderSetting lagChance = addSetting(
+            new SliderSetting("Lag Chance", 100.0f, 0.0f, 100.0f));
+    private final SliderSetting lagMaxDuration = addSetting(
+            new SliderSetting("Lag Max Duration", 200.0f, 50.0f, 500.0f));
+    private final BoolSetting preventDelayAttacks = addSetting(
+            new BoolSetting("Prevent delaying attacks", true));
+    private final BoolSetting blockAgainImmediately = addSetting(
+            new BoolSetting("Block again immediately", true));
+    private final BoolSetting forceBlockAnimation = addSetting(
+            new BoolSetting("Force block animation", true));
+
+    // ── State ─────────────────────────────────────────────────────────────
+
+    private boolean isBlocking;
+    private boolean manualBlock;
+    private int blockStartTick = -1;
+    private int lastSelfHurtTime;
+    // Current target (nearest valid player in range)
+    private Object currentTarget;
+
+    // Lag state (OutboundLagQueue-based: buffers non-attack packets during lag window).
+    private final OutboundLagQueue outbound = new OutboundLagQueue();
+    private final Consumer<Object> releaseHeldPacket = PacketUtil::sendPacketReleased;
+    private boolean isLagging;
+    private int lagStartTick = -1;
+    // Tick counter (monotonic, wraps safely)
+    private int tickCounter;
+
+    // ── Deferred reblock (1-tick defer after C02 attack) ──────────────────────
+    // Always defer reblock by 1 tick after attack: field_78781_i (blockHitDelay)
+    // controls block-breaking, not item use. Same-tick C02 + C08 flags Grim.
+    private int reblockPendingTick = -1;
+
+    // ── Construction ──────────────────────────────────────────────────────
+
+    public AutoBlockModule() {
+        super("Auto Block", "Holds right-click to block with a sword when a target is in range",
+                Category.COMBAT);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────
+
+    private static int msToTicks(float ms) {
+        if (ms <= 0.0f) return 0;
+        return (int) Math.ceil(ms / 50.0);
+    }
+
+    // ── Module lifecycle ──────────────────────────────────────────────────
+
+    @Override
+    public void onEnable() {
+        tickCounter = 0;
+        reblockPendingTick = -1;
+        resetState(false);
+        gnu.client.runtime.packet.PacketEvents.register(this);
+    }
+
+    @Override
+    public void onDisable() {
+        gnu.client.runtime.packet.PacketEvents.unregister(this);
+        resetState(true);
+    }
+
+    // ── Tick (Module.onTickStart, dispatched from ModuleManager) ─────────
+
+    @Override
+    public void onTickStart() {
+        tickCounter++;
+        int currentTick = tickCounter;
+
+        Object player = McAccess.thePlayer();
+        Object world = McAccess.theWorld();
+        if (player == null || world == null || McAccess.currentScreen() != null) {
+            resetState(true);
+            return;
+        }
+
+        // Process deferred reblock (from onSend attack path)
+        if (reblockPendingTick >= 0 && currentTick >= reblockPendingTick) {
+            reblockPendingTick = -1;
+            if (blockAgainImmediately.getValue() && isHoldingSword() && !isBlocking && !isLagging) {
+                startBlocking(currentTick);
+            }
+        }
+
+        int selfHurtTime = McAccess.getInt(player, "field_70737_aN");
+        boolean hurtAgain = selfHurtTime > lastSelfHurtTime;
+        lastSelfHurtTime = selfHurtTime;
+
+        if (!isHoldingSword()) {
+            resetState(false);
+            return;
+        }
+
+        // ── Target finding ────────────────────────────────────────────────
+        // Match raven-bS CombatTargeting: mouse-over target first, then closest
+        currentTarget = findTarget(player, world);
+
+        // ── Input state ───────────────────────────────────────────────────
+        // Raven-bS: both KillAura and AutoClicker count as LMB held
+        boolean clickSourceActive = isClickSourceActive();
+        boolean rmbDown = McAccess.isPhysicalRmbDown();
+        boolean lmbDown = McAccess.isPhysicalLmbDown() || clickSourceActive;
+
+        // ── Raven-bS flow ─────────────────────────────────────────────────
+        if (!rmbDown) {
+            resetState(true);
+            return;
+        }
+
+        if (!lmbDown) {
+            // Manual block (RMB only, no LMB)
+            if (isLagging) releaseLag();
+            if (!isBlocking) {
+                startBlocking(currentTick);
+                manualBlock = true;
+            }
+            return;
+        }
+
+        if (manualBlock) {
+            stopBlocking(true);
+            manualBlock = false;
+        }
+
+        boolean hasTarget = currentTarget != null;
+        boolean conditionsMet = hasTarget && checkConditions(lmbDown, rmbDown);
+
+        // ── Lag management ────────────────────────────────────────────────
+        if (isLagging) {
+            int lagMaxTicks = msToTicks(lagMaxDuration.getValue());
+            boolean lagExpired = lagMaxTicks > 0 && lagStartTick >= 0
+                    && currentTick - lagStartTick >= lagMaxTicks;
+
+            if (lagExpired || !conditionsMet) {
+                releaseLag();
+            }
+        }
+
+        if (!conditionsMet) {
+            stopBlocking(true);
+            return;
+        }
+
+        // ── Start blocking ────────────────────────────────────────────────
+        // Raven-bS: only when not blocking and not lagging.
+        if (!isBlocking && !isLagging) {
+            boolean shouldStart;
+            if (onlyWhenDamaged.getValue()) {
+                shouldStart = shouldPredictiveBlock();
+            } else {
+                shouldStart = true;
+            }
+            if (shouldStart) {
+                startBlocking(currentTick);
+            }
+        }
+
+        // ── Hold-time expiry -> lag (Raven-bS order: startLag THEN stopBlocking)
+        if (isBlocking) {
+            int maxHoldTicks = msToTicks(maxHoldMs.getValue());
+            boolean timeExpired = maxHoldTicks > 0 && blockStartTick >= 0
+                    && currentTick - blockStartTick >= maxHoldTicks;
+            boolean shouldStop = timeExpired;
+            if (onlyWhenDamaged.getValue() && hurtAgain) {
+                shouldStop = true;
+            }
+            if (shouldStop) {
+                /* Step 1 (Raven-bS order): start lag first — the blink */
+                if (shouldStartLag()) {
+                    startLag(currentTick);
+                }
+                /* Step 2: then stop blocking — key state released */
+                stopBlocking(true);
+            }
+        }
+
+    }
+
+    // ── Overlay hook for forceBlockAnimation ──────────────────────────────
+
+    @Override
+    public void onOverlay(Object scaledResolution) {
+        if (!forceBlockAnimation.getValue() || !isHoldingSword()) return;
+        if (!isBlocking && !isLagging) return;
+
+        try {
+            Object player = McAccess.thePlayer();
+            if (player == null) return;
+            Object stack = McAccess.invoke(player, "func_70694_bm", new Class<?>[0]);
+            if (stack == null) return;
+            McAccess.setInt(player, "field_71072_f", 72000);
+            McAccess.setObject(player, "field_71074_e", stack);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    // ── PacketListener ──────────────────────────────────────────────────
+
+    @Override
+    public boolean onSend(Object packet) {
+        if (packet == null || PacketUtil.isDispatching()) return false;
+        if (!preventDelayAttacks.getValue()) return false;
+
+        if (isLagging) {
+            if (PacketHelper.isAttackUseEntity(packet)) {
+                // Attack during lag: release lag (deactivates + drains), let C02 pass through.
+                releaseLag();
+                // Defer reblock by 1 tick: field_78781_i (blockHitDelay) only controls
+                // block-breaking delay, NOT item use (verified via bytecode on
+                // PlayerControllerMP.func_78769_a). Same-tick C02 + C08 causes flags.
+                reblockPendingTick = tickCounter + 1;
+                return false;
+            }
+            // C08 (use item / block placement) during lag: drop it, don't buffer.
+            if (PacketHelper.isSendUseItem(packet)) {
+                return true;
+            }
+            // C07 RELEASE_USE_ITEM during lag: cancel — tells server we stopped blocking.
+            if (PacketHelper.isReleaseUseItem(packet)) {
+                return true;
+            }
+            // Keepalive/chat/C0F transaction confirm during lag: pass through immediately.
+            if (PacketHelper.isLagrangeSendExempt(packet)) {
+                return false;
+            }
+            // Full outbound blink: buffer ALL non-exempt packets during the lag window.
+            // No packet reaches the server except keepalive/chat/C0F. Previously had
+            // separate isPlayerMovement/isEntityAction guards — now a single catch-all
+            // ensures nothing bleeds through.
+            // C0A animation during lag: drop it — buffered C0As drain before C02
+            // on lag release, causing MultiActions E.
+            if (PacketHelper.isAnimationPacket(packet)) return true;
+            outbound.offer(packet);
+            return true;
+        }
+
+        // Not lagging: original behavior — release on attack C02 (cleanup).
+        if (!PacketHelper.isAttackUseEntity(packet)) return false;
+
+        if (blockAgainImmediately.getValue() && isHoldingSword()) {
+            // Defer reblock by 1 tick: field_78781_i (blockHitDelay) only controls
+            // block-breaking delay, NOT item use (verified via bytecode on
+            // PlayerControllerMP.func_78769_a). Same-tick C02 + C08 causes flags.
+            reblockPendingTick = tickCounter + 1;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean onReceive(Object packet) {
+        // S08 server teleport/respawn/join: release lag (drain queue) but
+        // keep isBlocking=true so blocking resumes immediately after teleport.
+        // Raven does NOT reset blocking state on teleport -- the module
+        // re-evaluates conditions naturally on the next tick.
+        if (PacketHelper.isPlayerPosLook(packet)) {
+            releaseLag();
+            return false;
+        }
+
+        // Note: Raven does NOT release lag on self-velocity (getting hit).
+        // The lag window continues uninterrupted through damage.
+        // Removed S12 handler to match Raven behavior.
+
+        return false;
+    }
+
+    // ── Target finding ────────────────────────────────────────────────────
+
+    private Object findTarget(Object player, Object world) {
+        Class<?> playerCls = McAccess.gameClass("net.minecraft.entity.player.EntityPlayer");
+        if (playerCls == null)
+            return null;
+
+        double rangeSq = range.getValue() * range.getValue();
+
+        // 1. Check mouse-over target first (raven-bS priority)
+        Object mop = McAccess.objectMouseOver();
+        if (mop != null) {
+            Object hitEntity = McAccess.invoke(mop, "func_78288_c", new Class<?>[0]); // entityHit
+            if (hitEntity != null && playerCls.isInstance(hitEntity)
+                    && isValidTarget(hitEntity, player, rangeSq)) {
+                return hitEntity;
+            }
+        }
+
+        // 2. Fall back to closest
+        return findClosestTarget(player, world, playerCls, rangeSq);
+    }
+
+    private Object findClosestTarget(Object player, Object world,
+                                     Class<?> playerCls, double rangeSq) {
+        Object best = null;
+        double bestDist = rangeSq;
+
+        for (Object entity : McAccess.getWorldEntities(world)) {
+            if (entity == null || !playerCls.isInstance(entity))
+                continue;
+            if (!isValidTarget(entity, player, rangeSq))
+                continue;
+
+            double dx = McAccess.entityPosX(entity) - McAccess.entityPosX(player);
+            double dy = McAccess.entityPosY(entity) - McAccess.entityPosY(player);
+            double dz = McAccess.entityPosZ(entity) - McAccess.entityPosZ(player);
+            double distSq = dx * dx + dy * dy + dz * dz;
+
+            if (distSq < bestDist) {
+                bestDist = distSq;
+                best = entity;
+            }
+        }
+
+        return best;
+    }
+
+    private boolean isValidTarget(Object entity, Object player, double rangeSq) {
+        if (entity == player)
+            return false;
+        if (McAccess.getBool(entity, "field_70128_L"))
+            return false; // isDead
+        if (ignoreTeammates.getValue() && isTeammate(entity))
+            return false;
+
+        double dx = McAccess.entityPosX(entity) - McAccess.entityPosX(player);
+        double dy = McAccess.entityPosY(entity) - McAccess.entityPosY(player);
+        double dz = McAccess.entityPosZ(entity) - McAccess.entityPosZ(player);
+        return dx * dx + dy * dy + dz * dz <= rangeSq;
+    }
+
+    // ── Condition checks ──────────────────────────────────────────────────
+
+    private boolean checkConditions(boolean lmbDown, boolean rmbDown) {
+        if (requireLmb.getValue() && !lmbDown) return false;
+        if (requireRmb.getValue() && !rmbDown) return false;
+        return true;
+    }
+
+    private boolean shouldPredictiveBlock() {
+        Object player = McAccess.thePlayer();
+        if (player == null) return false;
+        int selfHurtTime = McAccess.getInt(player, "field_70737_aN");
+        int triggerTick = (int) Math.round(maxHurtTimeMs.getValue() / 50.0);
+        triggerTick = Math.max(1, Math.min(10, triggerTick));
+        return selfHurtTime == triggerTick;
+    }
+
+    private static boolean isClickSourceActive() {
+        Module ac = ModuleManager.INSTANCE.getModule("AutoClicker");
+        return ac instanceof AutoClickerModule && ac.isEnabled();
+    }
+
+    // ── Blocking control ──────────────────────────────────────────────────
+
+    private void startBlocking(int currentTick) {
+        if (!isHoldingSword()) return;
+        McAccess.clearItemInUse(McAccess.thePlayer());
+        McAccess.setUseItemKeyState(true);
+        McAccess.pressUseItemKeyOnce();
+        isBlocking = true;
+        blockStartTick = currentTick;
+    }
+
+    private void stopBlocking(boolean forceRelease) {
+        if (!isBlocking && !forceRelease) return;
+        McAccess.setUseItemKeyState(false);
+        isBlocking = false;
+        blockStartTick = -1;
+    }
+
+    // ── Lag control ───────────────────────────────────────────────────────
+
+    private boolean shouldStartLag() {
+        double chance = lagChance.getValue();
+        if (chance <= 0.0) return false;
+        if (chance >= 100.0) return true;
+        return Math.random() * 100.0 < chance;
+    }
+
+    private void startLag(int currentTick) {
+        if (isLagging) return;
+        outbound.activate();
+        isLagging = true;
+        lagStartTick = currentTick;
+    }
+
+    private void releaseLag() {
+        if (!isLagging) return;
+        outbound.deactivate();
+        outbound.drainAll(releaseHeldPacket);
+        isLagging = false;
+        lagStartTick = -1;
+    }
+
+    // ── Public query ──────────────────────────────────────────────────────
+
+    /** Checked by WTapModule / KillAura to suppress C0A swings during lag. */
+    public boolean isLagging() {
+        return isLagging;
+    }
+
+    /** Checked by KillAura / VanillaModuleDriver to know if blocking is active. */
+    public boolean isActive() {
+        return isEnabled() && (isBlocking || isLagging);
+    }
+
+    /** Called by VanillaModuleDriver.noteAttack to release lag on swing. */
+    public void noteAttack(Object target) {
+        if (!isEnabled() || target == null) return;
+        if (!isLagging || !preventDelayAttacks.getValue()) return;
+        releaseLag();
+    }
+
+    // ── State reset ───────────────────────────────────────────────────────
+
+    private void resetState(boolean releaseUseKey) {
+        releaseLag();
+        stopBlocking(releaseUseKey);
+        manualBlock = false;
+        reblockPendingTick = -1;
+
+        // Do NOT manually send C07 RELEASE_USE_ITEM — it puts Grim into
+        // "releasing=true" state and cascades into false flagging. The correct
+        // mechanism: just call setUseItemKeyState(false) in stopBlocking() and
+        // leave itemInUse fields set. When the physical RMB is released
+        // (isKeyDown()=false) while isUsingItem()=true, the vanilla
+        // updateEntityActionState() fires stopUsingItem() which sends C07
+        // naturally in the correct packet context, next tick.
+        // Raven-bS: if RMB is still physically held, re-press the use-item key
+        if (releaseUseKey && McAccess.isPhysicalRmbDown()
+                && McAccess.currentScreen() == null && isHoldingSword()) {
+            McAccess.setUseItemKeyState(true);
+        }
+        currentTarget = null;
+        lastSelfHurtTime = 0;
+    }
+
+    // ── Utility ───────────────────────────────────────────────────────────
+
+    private static boolean isHoldingSword() {
+        Object player = McAccess.thePlayer();
+        if (player == null) return false;
+        Object stack = McAccess.invoke(player, "func_70694_bm", new Class<?>[0]);
+        if (stack == null) return false;
+        Object item = McAccess.invoke(stack, "func_77973_b", new Class<?>[0]);
+        if (item == null) return false;
+        Class<?> sword = McAccess.gameClass("net.minecraft.item.ItemSword");
+        return sword != null && sword.isInstance(item);
+    }
+
+    private static boolean isTeammate(Object entity) {
+        Object player = McAccess.thePlayer();
+        if (player == null || entity == null) return false;
+        try {
+            Object team = McAccess.invoke(entity, "func_96124_cp", new Class<?>[0]);
+            if (team != null) {
+                Object ourTeam = McAccess.invoke(player, "func_96124_cp", new Class<?>[0]);
+                if (ourTeam != null) {
+                    Object teamName = McAccess.invoke(team, "func_96661_b", new Class<?>[0]);
+                    Object ourName = McAccess.invoke(ourTeam, "func_96661_b", new Class<?>[0]);
+                    return teamName != null && ourName != null && teamName.equals(ourName);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+}

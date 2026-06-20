@@ -1,0 +1,81 @@
+package gnu.client.runtime;
+
+import gnu.client.module.Module;
+import gnu.client.module.ModuleManager;
+import gnu.client.module.modules.visual.FreeLookModule;
+import gnu.client.runtime.mc.McAccess;
+
+/**
+ * Camera rotation override injected into {@code EntityRenderer.renderWorldPass} via
+ * {@link WorldRenderTransformer}. Fires on the render thread AFTER vanilla mouse
+ * processing has already written its delta into the player's real rotation, so there
+ * is no write-contention — CameraHook reads the post-mouse rotation, accumulates the
+ * delta into independent freelook camera angles, sets the player rotation to those
+ * camera angles for {@code orientCamera()}, then restores the original rotation after
+ * rendering. This eliminates the three-writer race that plagues tick-based freelook
+ * (vanilla setAngles in onTickStart vs onTick vs orientCamera).
+ *
+ * <p>Guard uses OR-free logic per the decompiled fix: check null, check instanceof,
+ * check isEnabled, check isPerspectiveActive. All four must pass before any rotation
+ * writes occur.
+ */
+public final class CameraHook {
+
+    private static final String FIELD_ROTATION_YAW = "field_70177_z";
+    private static final String FIELD_ROTATION_PITCH = "field_70125_A";
+
+    private CameraHook() {}
+
+    /**
+     * Called at HEAD of {@code renderWorldPass}. Reads the player's current rotation
+     * (which vanilla has already modified by mouse delta for this frame), accumulates
+     * that delta into the FreeLook camera angles, then writes camera angles back to
+     * player rotation so that {@code orientCamera()} (called inside renderWorldPass)
+     * positions the third-person camera at the freelook view direction.
+     */
+    public static void beforeRenderWorldPass() {
+        Module m = ModuleManager.INSTANCE.getModule("FreeLook");
+        if (!(m instanceof FreeLookModule))
+            return;
+        FreeLookModule fl = (FreeLookModule) m;
+        if (!fl.isEnabled() || !fl.isPerspectiveActive())
+            return;
+
+        Object player = McAccess.thePlayer();
+        if (player == null)
+            return;
+
+        // Read the rotation vanilla has already updated with this frame's mouse delta
+        float currentYaw = McAccess.getFloat(player, FIELD_ROTATION_YAW);
+        float currentPitch = McAccess.getFloat(player, FIELD_ROTATION_PITCH);
+
+        // Accumulate delta into independent camera angles
+        fl.accumulateCameraDelta(currentYaw, currentPitch);
+
+        // Override player rotation so orientCamera uses freelook direction
+        McAccess.setFloat(player, FIELD_ROTATION_YAW, fl.getCameraYaw());
+        McAccess.setFloat(player, FIELD_ROTATION_PITCH, fl.getCameraPitch());
+    }
+
+    /**
+     * Called before each RETURN of {@code renderWorldPass}. Restores player rotation
+     * to the original frozen facing direction so that the next tick's movement logic,
+     * mouse processing, and packet sending all use the character body direction, not
+     * the freelook camera direction.
+     */
+    public static void afterRenderWorldPass() {
+        Module m = ModuleManager.INSTANCE.getModule("FreeLook");
+        if (!(m instanceof FreeLookModule))
+            return;
+        FreeLookModule fl = (FreeLookModule) m;
+        if (!fl.isEnabled() || !fl.isPerspectiveActive())
+            return;
+
+        Object player = McAccess.thePlayer();
+        if (player == null)
+            return;
+
+        McAccess.setFloat(player, FIELD_ROTATION_YAW, fl.getOriginalYaw());
+        McAccess.setFloat(player, FIELD_ROTATION_PITCH, fl.getOriginalPitch());
+    }
+}

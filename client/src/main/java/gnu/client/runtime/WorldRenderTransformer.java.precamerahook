@@ -1,0 +1,112 @@
+package gnu.client.runtime;
+
+import gnu.client.common.GnuLog;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Label;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
+
+/**
+ * JVMTI ClassFileLoadHook patches {@code EntityRenderer.renderWorldPass} (pass 1):
+ * <ul>
+ *   <li>At RETURN (pass 1): calls {@link WorldRenderHook#onWorldRender(float)} for
+ *       module rendering.</li>
+ * </ul>
+ *
+ * <p>The freelook camera override ({@code CameraHook}) has been removed in favor of
+ * a tick-based approach matching Raven-bS Freelook: {@code onTickStart()} restores
+ * original rotation before movement processing, {@code onTick()} accumulates mouse
+ * delta into camera angles and sets player rotation for orientCamera. See
+ * {@code FreeLookModule}.</p>
+ */
+public final class WorldRenderTransformer {
+
+    private static final String HOOK_OWNER = "gnu/client/runtime/WorldRenderHook";
+    private static final String HOOK_METHOD = "onWorldRender";
+    private static final String HOOK_DESC = "(F)V";
+
+    private WorldRenderTransformer() {}
+
+    public static byte[] transform(String className, byte[] classBytes) {
+        if (classBytes == null)
+            return null;
+        if (!isEntityRenderer(className))
+            return null;
+        try {
+            ClassReader reader = new ClassReader(classBytes);
+            ClassWriter writer = new SafeClassWriter(reader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
+            boolean[] patched = new boolean[] { false };
+
+            ClassVisitor visitor = new ClassVisitor(Opcodes.ASM9, writer) {
+                @Override
+                public MethodVisitor visitMethod(int access, String name, String desc, String signature,
+                                                 String[] exceptions) {
+                    MethodVisitor mv = super.visitMethod(access, name, desc, signature, exceptions);
+                    if (mv == null)
+                        return null;
+                    if (!isRenderWorldPass(name, desc))
+                        return mv;
+                    return injectRenderHook(mv, patched);
+                }
+            };
+
+            reader.accept(visitor, 0);
+            if (!patched[0]) {
+                GnuLog.log("JAVA_ WorldRenderTransformer: no patch for " + className);
+                return null;
+            }
+            GnuLog.log("JAVA_ WorldRenderTransformer: patched " + className + " renderWorldPass");
+            return writer.toByteArray();
+        } catch (Throwable t) {
+            GnuLog.log("JAVA_ WorldRenderTransformer failed for " + className + ": " + t);
+            return null;
+        }
+    }
+
+    /**
+     * Injects {@code WorldRenderHook.onWorldRender(partialTicks)} before each
+     * RETURN when {@code pass == 1}.
+     */
+    private static MethodVisitor injectRenderHook(MethodVisitor mv, boolean[] patched) {
+        return new MethodVisitor(Opcodes.ASM9, mv) {
+            @Override
+            public void visitInsn(int opcode) {
+                if (opcode == Opcodes.RETURN) {
+                    Label skip = new Label();
+                    super.visitVarInsn(Opcodes.ILOAD, 1);   // load pass param
+                    super.visitInsn(Opcodes.ICONST_1);
+                    super.visitJumpInsn(Opcodes.IF_ICMPNE, skip);
+
+                    // WorldRenderHook.onWorldRender(partialTicks)
+                    super.visitVarInsn(Opcodes.FLOAD, 2);
+                    super.visitMethodInsn(Opcodes.INVOKESTATIC, HOOK_OWNER, HOOK_METHOD, HOOK_DESC, false);
+
+                    super.visitLabel(skip);
+                    patched[0] = true;
+                }
+                super.visitInsn(opcode);
+            }
+        };
+    }
+
+    private static boolean isEntityRenderer(String name) {
+        return "net/minecraft/client/renderer/EntityRenderer".equals(name);
+    }
+
+    private static boolean isRenderWorldPass(String name, String desc) {
+        return "renderWorldPass".equals(name) && "(IFJ)V".equals(desc);
+    }
+
+    private static final class SafeClassWriter extends ClassWriter {
+        SafeClassWriter(ClassReader reader, int flags) {
+            super(reader, flags);
+        }
+
+        @Override
+        protected String getCommonSuperClass(String type1, String type2) {
+            return "java/lang/Object";
+        }
+    }
+}

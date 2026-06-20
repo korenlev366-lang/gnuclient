@@ -1,0 +1,356 @@
+package gnu.client.module.modules.combat;
+
+import gnu.client.module.Category;
+import gnu.client.module.Module;
+import gnu.client.module.ModuleManager;
+import gnu.client.module.setting.BoolSetting;
+import gnu.client.module.setting.ModeSetting;
+import gnu.client.module.setting.SliderSetting;
+import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.packet.PacketEvents;
+import gnu.client.runtime.packet.PacketHelper;
+import gnu.client.runtime.packet.PacketListener;
+
+import java.util.Arrays;
+import java.util.Random;
+
+/**
+ * Knockback reduction. Two modes:
+ *
+ * <ul>
+ *   <li><b>Reduce</b> — (default) scales the local player's motion by configured
+ *       percentages every tick the player is hurt. Ported from RainClient
+ *       {@code Velocity}.</li>
+ *   <li><b>JumpReset</b> — jumps on knockback to reduce horizontal velocity.
+ *       Ported from the standalone JumpResetModule (now merged here).</li>
+ * </ul>
+ *
+ * <p>SRG (1.8.9): motionX=field_70159_w, motionY=field_70181_x, motionZ=field_70179_y
+ * (Entity); hurtTime=field_70737_aN (EntityLivingBase).</p>
+ */
+public final class VelocityModule extends Module implements PacketListener {
+
+    // ────────────────────────────────────────────────────────────────
+    // Mode
+    // ────────────────────────────────────────────────────────────────
+
+    private static final String[] MODES = { "Reduce", "JumpReset" };
+
+    private final ModeSetting mode =
+            addSetting(new ModeSetting("Mode", 0, Arrays.asList(MODES)));
+
+    // ────────────────────────────────────────────────────────────────
+    // Reduce mode settings (existing)
+    // ────────────────────────────────────────────────────────────────
+
+    private final SliderSetting horizontal =
+            addSetting(new SliderSetting("Horizontal %", 0.0f, 0.0f, 100.0f));
+    private final SliderSetting vertical =
+            addSetting(new SliderSetting("Vertical %", 0.0f, 0.0f, 100.0f));
+    private final SliderSetting chance =
+            addSetting(new SliderSetting("Chance %", 100.0f, 0.0f, 100.0f));
+
+    // ────────────────────────────────────────────────────────────────
+    // JumpReset mode settings (moved from JumpResetModule)
+    // ────────────────────────────────────────────────────────────────
+
+    private static final int HURT_TICK_TARGET = 9;
+
+    private final SliderSetting jumpChance =
+            addSetting(new SliderSetting("Chance", 100.0f, 0.0f, 100.0f));
+    private final SliderSetting minHorizontalKb =
+            addSetting(new SliderSetting("Min Horizontal KB", 0.0f, 0.0f, 10.0f));
+    private final SliderSetting tickDelay =
+            addSetting(new SliderSetting("Tick", 0.0f, 0.0f, 20.0f));
+    private final BoolSetting jumpHorizontal =
+            addSetting(new BoolSetting("Horizontal", true));
+    private final BoolSetting sprintingOnly =
+            addSetting(new BoolSetting("Sprinting only", false));
+    private final BoolSetting disableInWater =
+            addSetting(new BoolSetting("Disable in water", false));
+    private final BoolSetting disableOnHit =
+            addSetting(new BoolSetting("Disable on hit", false));
+
+    // ────────────────────────────────────────────────────────────────
+    // Shared state
+    // ────────────────────────────────────────────────────────────────
+
+    private final Random random = new Random();
+
+    // ────────────────────────────────────────────────────────────────
+    // JumpReset state (moved from JumpResetModule)
+    // ────────────────────────────────────────────────────────────────
+
+    private boolean isFallDamage;
+    private boolean hasHitKnockback;
+    private float lastHorizontalKb;
+    private int ticksSinceKnockback;
+    private int lastLimitTick = -1;
+
+    // ────────────────────────────────────────────────────────────────
+    // Construction
+    // ────────────────────────────────────────────────────────────────
+
+    public VelocityModule() {
+        super("Velocity", "Reduces knockback from hits", Category.COMBAT);
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // External API
+    // ────────────────────────────────────────────────────────────────
+
+    /** True when enabled and configured to reduce knockback in the active mode. */
+    public boolean reducesKnockback() {
+        if (!isEnabled())
+            return false;
+        if (mode.getValue() == 0)
+            return horizontal.getValue() < 100.0f || vertical.getValue() < 100.0f;
+        return true; // JumpReset mode always reduces via jump
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Module lifecycle
+    // ────────────────────────────────────────────────────────────────
+
+    @Override
+    public void onEnable() {
+        resetJumpResetState();
+        PacketEvents.register(this);
+    }
+
+    @Override
+    public void onDisable() {
+        PacketEvents.unregister(this);
+        resetJumpResetState();
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Tick handlers
+    // ────────────────────────────────────────────────────────────────
+
+    @Override
+    public void onTick() {
+        Object player = McAccess.thePlayer();
+        if (player == null)
+            return;
+
+        if (mode.getValue() == 0) {
+            // ── Reduce mode: existing behavior verbatim ──
+            // Fire every tick while hurt (not just the first frame): with OptiFine /
+            // Patcher the single-frame (hurtTime == maxHurtTime) edge is often missed.
+            int hurtTime = McAccess.getInt(player, "field_70737_aN");
+            if (hurtTime <= 0)
+                return;
+
+            if (random.nextInt(100) >= chance.getValue())
+                return;
+
+            double hMul = horizontal.getValue() / 100.0;
+            double vMul = vertical.getValue() / 100.0;
+
+            McAccess.setDouble(player, "field_70159_w", McAccess.getDouble(player, "field_70159_w") * hMul);
+            McAccess.setDouble(player, "field_70179_y", McAccess.getDouble(player, "field_70179_y") * hMul);
+            McAccess.setDouble(player, "field_70181_x", McAccess.getDouble(player, "field_70181_x") * vMul);
+        }
+        // JumpReset mode has no onTick work — it operates through
+        // patchMovementInput (called from EagleModule) + packet hooks in onReceive.
+    }
+
+    @Override
+    public void onTickStart() {
+        if (mode.getValue() != 1)
+            return;
+
+        Object player = McAccess.thePlayer();
+        if (player == null)
+            return;
+
+        int hurtTime = McAccess.getInt(player, "field_70737_aN");
+        if (hurtTime <= 0) {
+            hasHitKnockback = false;
+            isFallDamage = false;
+            ticksSinceKnockback = 0;
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // PacketListener
+    // ────────────────────────────────────────────────────────────────
+
+    @Override
+    public boolean onSend(Object packet) {
+        return false;
+    }
+
+    @Override
+    public boolean onReceive(Object packet) {
+        if (mode.getValue() != 1)
+            return false;
+
+        if (PacketHelper.isExplosion(packet)) {
+            PacketHelper.noteInboundExplosion();
+            return false;
+        }
+
+        if (!PacketHelper.isEntityVelocity(packet))
+            return false;
+
+        Object player = McAccess.thePlayer();
+        if (player == null)
+            return false;
+        if (PacketHelper.velocityEntityId(packet) != McAccess.entityId(player))
+            return false;
+
+        int motionX = PacketHelper.velocityMotionX(packet);
+        int motionY = PacketHelper.velocityMotionY(packet);
+        int motionZ = PacketHelper.velocityMotionZ(packet);
+
+        isFallDamage = PacketHelper.isFallDamageVelocity(motionX, motionY, motionZ);
+        lastHorizontalKb = horizontalKbMagnitude(motionX, motionZ);
+        boolean meleeKb = PacketHelper.isMeleeKnockbackVelocity(motionX, motionY, motionZ)
+                && !PacketHelper.isRecentExplosionKnockback();
+
+        if (meleeKb && !disableOnHit.getValue()) {
+            hasHitKnockback = true;
+            ticksSinceKnockback = 0;
+        }
+        return false;
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Static entry point (called from EagleModule JVMTI hook)
+    // ────────────────────────────────────────────────────────────────
+
+    /**
+     * Called from JVMTI-patched MovementInputFromOptions.updatePlayerMoveState
+     * (via EagleModule.patchMovementInput). Only acts in JumpReset mode.
+     */
+    public static void patchMovementInput(Object movInput) {
+        Module mod = ModuleManager.INSTANCE.getModule("Velocity");
+        if (!(mod instanceof VelocityModule)) {
+            return;
+        }
+        VelocityModule vm = (VelocityModule) mod;
+        if (!vm.isEnabled() || vm.mode.getValue() != 1)
+            return;
+        vm.applyJumpAtMovementInput(movInput);
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // JumpReset internals (moved from JumpResetModule)
+    // ────────────────────────────────────────────────────────────────
+
+    private void applyJumpAtMovementInput(Object movInput) {
+        Object player = McAccess.thePlayer();
+        if (player == null || movInput == null) {
+            return;
+        }
+
+        if (disableInWater.getValue() && isInWater(player)) {
+            return;
+        }
+
+        int hurtTime = McAccess.getInt(player, "field_70737_aN");
+        boolean onGround = McAccess.getBool(player, "field_70122_E");
+        boolean sprinting = passesSprintGate(player);
+
+        incrementTicksSinceKnockback();
+
+        if (hurtTime != HURT_TICK_TARGET) {
+            return;
+        }
+        if (!onGround) {
+            return;
+        }
+        if (!sprinting) {
+            return;
+        }
+        if (isFallDamage) {
+            return;
+        }
+        if (!hasHitKnockback) {
+            return;
+        }
+        if (!passesHorizontalGate()) {
+            return;
+        }
+        if (!passesTickDelay()) {
+            return;
+        }
+        if (!passesChance()) {
+            return;
+        }
+
+        McAccess.setBool(movInput, "field_78901_c", true);
+        hasHitKnockback = false;
+        ticksSinceKnockback = 0;
+    }
+
+    private void resetJumpResetState() {
+        isFallDamage = false;
+        hasHitKnockback = false;
+        lastHorizontalKb = 0.0f;
+        ticksSinceKnockback = 0;
+        lastLimitTick = -1;
+    }
+
+    private void incrementTicksSinceKnockback() {
+        if (!hasHitKnockback)
+            return;
+        Object player = McAccess.thePlayer();
+        if (player == null)
+            return;
+        int tick = McAccess.getInt(player, "field_70173_aa");
+        if (tick == lastLimitTick)
+            return;
+        lastLimitTick = tick;
+        ticksSinceKnockback++;
+    }
+
+    private boolean passesTickDelay() {
+        return ticksSinceKnockback >= tickDelay.getValue().intValue();
+    }
+
+    private boolean passesHorizontalGate() {
+        if (!jumpHorizontal.getValue())
+            return true;
+        if (minHorizontalKb.getValue() <= 0.001f)
+            return lastHorizontalKb > 0.001f;
+        return lastHorizontalKb >= minHorizontalKb.getValue();
+    }
+
+    private boolean passesChance() {
+        float c = jumpChance.getValue();
+        if (c >= 100.0f)
+            return true;
+        return random.nextInt(100) <= c;
+    }
+
+    private static float horizontalKbMagnitude(int motionX, int motionZ) {
+        double hx = motionX / 8000.0;
+        double hz = motionZ / 8000.0;
+        return (float) Math.sqrt(hx * hx + hz * hz);
+    }
+
+    private static boolean isInWater(Object player) {
+        Object r = McAccess.invoke(player, "func_70090_H", new Class<?>[0]);
+        return r instanceof Boolean && (Boolean) r;
+    }
+
+    private boolean passesSprintGate(Object player) {
+        if (!sprintingOnly.getValue())
+            return true;
+
+        Module sprint = ModuleManager.INSTANCE.getModule("Sprint");
+        if (sprint != null && sprint.isEnabled())
+            return true;
+        if (player == null)
+            return false;
+
+        Object sprinting = McAccess.invoke(player, "func_70051_af", new Class<?>[0]);
+        if (sprinting instanceof Boolean && (Boolean) sprinting)
+            return true;
+
+        return McAccess.getInt(player, "field_20052_b") > 0;
+    }
+}

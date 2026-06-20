@@ -1,0 +1,241 @@
+package gnu.client.runtime.packet;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+
+/**
+ * raven-bS {@code BiTrackLagNodeQueue} outbound track (session marker + packet FIFO).
+ * While session is open, outbound packets are cancelled and queued. {@code endSession()}
+ * matches {@code forceTimeOut}; drain releases queued packets (game-tick / send-path).
+ *
+ * <p><b>Raven-parity drain on game tick:</b> {@link #tickDrain} releases ALL closed-session
+ * packets in one call (no rate limit). This matches raven-bS BiTrackLagNodeQueue.tick(null, null)
+ * behavior — the drain fires on game tick boundary, preventing mid-combat-logic bursts while
+ * ensuring the queue clears quickly after a session ends.</p>
+ *
+ * <p><b>Raven parity on attack:</b> {@link LagrangeModule#onSend} queues the C02 attack
+ * packet like any other packet, then calls {@link #endSession} afterward. The queued C02
+ * + C03s are released together by {@link #tickDrain} on the next game tick — no split
+ * between attack and movement, matching Raven's tick-based drain exactly.</p>
+ *
+ */
+public final class LagrangeOutboundTrack {
+
+    private static final Object SESSION_MARKER = new Object();
+    /** Raven parity — drain ALL closed-session packets on game tick (no rate limit). */
+    private static final int MAX_DRAIN_PER_TICK = Integer.MAX_VALUE;
+    /** Max packets released per flushLag call — no limit (C0F/C00 keepalives are exempt, no timeout risk). */
+    private static final int MAX_DRAIN_PER_FLUSH = Integer.MAX_VALUE;
+
+    private final ArrayList<Object> fifo = new ArrayList<>();
+    private boolean sessionOpen;
+
+    public synchronized boolean hasQueuedPackets() {
+        for (Object o : fifo) {
+            if (o instanceof Entry)
+                return true;
+        }
+        return false;
+    }
+
+    public synchronized void clear() {
+        fifo.clear();
+        sessionOpen = false;
+    }
+
+    /** Raven {@code requestLag} — {@code AddRequestLagNode} at tail. */
+    public synchronized void beginSession() {
+        sessionOpen = true;
+        fifo.add(SESSION_MARKER);
+    }
+
+    /** Raven {@code flushLag} / {@code forceTimeOut} — do not release here. */
+    public synchronized void endSession() {
+        sessionOpen = false;
+    }
+
+    public synchronized boolean isSessionOpen() {
+        return sessionOpen;
+    }
+
+
+    /**
+     * Raven {@code UnifiedLagHandler.onSendPacket} + {@code queue.tick(packet, OUTBOUND)}.
+     * Attack packets end the session (pass-through) without queuing — C02 reaches server
+     * immediately while queued C03s release on the next tickDrain.
+     *
+     * @return true to cancel vanilla send
+     */
+    public synchronized boolean onOutboundPacket(
+            Object packet,
+            Predicate<Object> exempt,
+            Predicate<Object> isAttack,
+            Consumer<Object> releaser) {
+        if (packet == null)
+            return false;
+
+        if (exempt.test(packet))
+            return false;
+
+        if (sessionOpen) {
+            fifo.add(new Entry(packet, System.currentTimeMillis()));
+            return true;
+        }
+
+        // Raven parity: session closed but FIFO has leftover packets.
+        // Add this packet to the FIFO then drain everything synchronously
+        // (matches BiTrackLagNodeQueue.TrackState.tick() while-loop behavior).
+        if (!fifo.isEmpty()) {
+            fifo.add(new Entry(packet, System.currentTimeMillis()));
+            drainIfSessionClosed(releaser, Integer.MAX_VALUE);
+            return true;
+        }
+
+        return false; // no session, empty queue, pass through
+    }
+
+    /** Raven {@code GameTickEvent} {@code queue.tick(null,null)} — rate-limited to 1 packet. */
+    public synchronized void tickDrain(Consumer<Object> releaser) {
+        drainIfSessionClosed(releaser, MAX_DRAIN_PER_TICK);
+    }
+
+    /**
+     * Drain a moderate number of packets without sessionOpen check.
+     * Used by flushLag() combat-path calls — releases enough to make progress
+     * on the queue without bursting all at once and triggering MultiActions.
+     * Stops when hitting a SESSION_MARKER (packets from an active session).
+     */
+    public synchronized void drainRemaining(Consumer<Object> releaser) {
+        drainBeforeMarker(releaser, MAX_DRAIN_PER_FLUSH);
+    }
+
+    /**
+     * Drain all queued packets without rate limit. Used by {@code flushQueueNow} (onDisable,
+     * pauseForBlink) where burst is acceptable because the session is ending permanently.
+     */
+    public synchronized void drainAll(Consumer<Object> releaser) {
+        drainIfSessionClosed(releaser, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Drain all queued packets from the most recently closed session.
+     * Used on the attack path to release queued C03 positions before
+     * the attack packet reaches the server, preventing Reach flags
+     * from stale position data.
+     */
+    public synchronized void drainQueued(Consumer<Object> releaser) {
+        drainIfSessionClosed(releaser, Integer.MAX_VALUE);
+    }
+
+    /** Raven {@code releaseExpiredPackets} while session is still open. */
+    public synchronized void releaseExpired(long maxAgeMs, Consumer<Object> releaser) {
+        if (!sessionOpen || releaser == null || fifo.isEmpty())
+            return;
+        long cutoff = System.currentTimeMillis() - Math.max(0L, maxAgeMs);
+        Iterator<Object> it = fifo.iterator();
+        while (it.hasNext()) {
+            Object node = it.next();
+            if (!(node instanceof Entry))
+                continue;
+            Entry e = (Entry) node;
+            if (e.queuedAtMs <= cutoff) {
+                it.remove();
+                releaser.accept(e.packet);
+            }
+        }
+    }
+
+    /** Rate-limited release — max 1 per tick to prevent Grim MultiActionsE from C03 bursts. */
+    public synchronized void releaseExpiredLimited(long maxAgeMs, int maxCount, Consumer<Object> releaser) {
+        if (!sessionOpen || releaser == null || maxCount <= 0 || fifo.isEmpty())
+            return;
+        long cutoff = System.currentTimeMillis() - Math.max(0L, maxAgeMs);
+        int released = 0;
+        Iterator<Object> it = fifo.iterator();
+        while (it.hasNext() && released < maxCount) {
+            Object node = it.next();
+            if (!(node instanceof Entry))
+                continue;
+            Entry e = (Entry) node;
+            if (e.queuedAtMs <= cutoff) {
+                it.remove();
+                releaser.accept(e.packet);
+                released++;
+            }
+        }
+    }
+
+    /**
+     * Drain closed-session packets with a per-call release limit.
+     * Only drains when session is closed — skips if a new session started.
+     * Releases at most {@code maxRelease} entries per invocation; remaining
+     * packets stay in the FIFO for the next tickDrain call.
+     */
+    private void drainIfSessionClosed(Consumer<Object> releaser, int maxRelease) {
+        if (sessionOpen || releaser == null || maxRelease <= 0)
+            return;
+        int released = 0;
+        Iterator<Object> it = fifo.iterator();
+        while (it.hasNext()) {
+            Object node = it.next();
+            if (node == SESSION_MARKER) {
+                it.remove();
+                continue;
+            }
+            if (node instanceof Entry) {
+                if (released >= maxRelease)
+                    break;
+                it.remove();
+                releaser.accept(((Entry) node).packet);
+                released++;
+            }
+        }
+    }
+
+    /**
+     * Drain packets before the first SESSION_MARKER, with a per-call limit.
+     * Does NOT check sessionOpen — used for force-flush paths that want to
+     * clear leftover packets from a closed session even if a new session marker
+     * has been added. Removes leading SESSION_MARKER(s) then drains entries
+     * until the next marker (preserving active session) or when {@code maxRelease}
+     * is reached.
+     */
+    private void drainBeforeMarker(Consumer<Object> releaser, int maxRelease) {
+        if (releaser == null || maxRelease <= 0 || fifo.isEmpty())
+            return;
+        int released = 0;
+        Iterator<Object> it = fifo.iterator();
+        while (it.hasNext()) {
+            Object node = it.next();
+            if (node == SESSION_MARKER) {
+                // Remove leading marker(s) — they belong to an ended session.
+                // Stop only if we have already released entries AND hit another
+                // marker, meaning a new session started.
+                it.remove();
+                if (released > 0) {
+                    break;
+                }
+                continue;
+            }
+            if (node instanceof Entry) {
+                if (released >= maxRelease)
+                    break;
+                it.remove();
+                releaser.accept(((Entry) node).packet);
+                released++;
+            }
+        }
+    }
+
+    private static final class Entry {
+        final Object packet;
+        final long queuedAtMs;
+
+        Entry(Object packet, long queuedAtMs) {
+            this.packet = packet;
+            this.queuedAtMs = queuedAtMs;
+        }
+    }
+}

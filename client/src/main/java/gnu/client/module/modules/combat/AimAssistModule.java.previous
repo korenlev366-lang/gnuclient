@@ -1,0 +1,564 @@
+package gnu.client.module.modules.combat;
+
+import gnu.client.module.Category;
+import gnu.client.module.Module;
+import gnu.client.module.setting.BoolSetting;
+import gnu.client.module.setting.ModeSetting;
+import gnu.client.module.setting.SliderSetting;
+import gnu.client.runtime.mc.McAccess;
+import gnu.client.util.RenderHelper;
+import org.lwjgl.opengl.GL11;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
+
+/**
+ * Timewarp Aim Assist — faithful port from ctw.dll.
+ *
+ * Tick-based rotation update (smoothRotationHv + fixRotation).
+ * Separate Horizontal speed / Vertical speed.
+ * AimMode = Static (center) / Multipoint (offset slider).
+ * TargetingMode = Closest / Lowest HP / Single / Switch.
+ *
+ * Architecture: onTick does everything (conditions, target selection,
+ * smoothing, rotation write). onRender / onOverlay handle visuals only
+ * (target line, FOV circle).
+ */
+public final class AimAssistModule extends Module {
+
+    private static final List<String> AIM_MODES = Arrays.asList("Static", "Multipoint");
+    private static final List<String> TARGETING_MODES = Arrays.asList(
+            "Closest", "Lowest HP", "Single", "Switch");
+
+    private static final float CHECK_PITCH_LIMIT = 80.0f;
+    private static final float VERTICAL_CHECK_LIMIT = 45.0f;
+
+    /** Hover delay: ms without any click (physical, autoclicker, or killaura) before rotation stops. */
+    private static final long HOVER_DELAY_MS = 500L;
+
+    /** Shared timestamp updated by AimAssist, AutoClicker, and KillAura on each click/attack. */
+    public static volatile long lastClickMs = 0L;
+
+    // ==================== Settings (Timewarp-matching) ====================
+
+    private final ModeSetting aimMode = addSetting(new ModeSetting("Mode", 0, AIM_MODES));
+    private final ModeSetting targetingMode = addSetting(new ModeSetting("Targeting", 0, TARGETING_MODES));
+    private final SliderSetting horizontalSpeed = addSetting(new SliderSetting("Horizontal speed", 10.0f, 1.0f, 100.0f));
+    private final SliderSetting verticalSpeed = addSetting(new SliderSetting("Vertical speed", 10.0f, 0.0f, 100.0f));
+    private final SliderSetting maximumFov = addSetting(new SliderSetting("MaximumFov", 90.0f, 15.0f, 360.0f));
+    private final SliderSetting maximumRange = addSetting(new SliderSetting("MaximumRange", 4.5f, 0.0f, 6.0f));
+    private final SliderSetting minimumRange = addSetting(new SliderSetting("MinimumRange", 0.0f, 0.0f, 6.0f));
+    private final SliderSetting targetSwitchDelay = addSetting(new SliderSetting("TargetSwitchDelay", 0.0f, 0.0f, 1000.0f));
+    private final SliderSetting multipointOffset = addSetting(new SliderSetting("Multipoint offset", 0.0f, 0.0f, 100.0f));
+    private final SliderSetting randomization = addSetting(new SliderSetting("Randomization", 50.0f, 0.0f, 100.0f));
+
+    private final BoolSetting visualizeFov = addSetting(new BoolSetting("Visualize FOV", false));
+    private final SliderSetting fovColorR = addSetting(new SliderSetting("FovColorR", 255.0f, 0.0f, 255.0f));
+    private final SliderSetting fovColorG = addSetting(new SliderSetting("FovColorG", 255.0f, 0.0f, 255.0f));
+    private final SliderSetting fovColorB = addSetting(new SliderSetting("FovColorB", 255.0f, 0.0f, 255.0f));
+
+    private final BoolSetting targetLine = addSetting(new BoolSetting("Target line", false));
+    private final SliderSetting targetLineColorR = addSetting(new SliderSetting("TargetLineColorR", 255.0f, 0.0f, 255.0f));
+    private final SliderSetting targetLineColorG = addSetting(new SliderSetting("TargetLineColorG", 0.0f, 0.0f, 255.0f));
+    private final SliderSetting targetLineColorB = addSetting(new SliderSetting("TargetLineColorB", 0.0f, 0.0f, 255.0f));
+    private final SliderSetting targetLineThickness = addSetting(new SliderSetting("Line thickness", 1.5f, 1.0f, 4.0f));
+
+    private final BoolSetting aimAtInvisible = addSetting(new BoolSetting("Aim at invisible", false));
+    private final BoolSetting ignoreFriends = addSetting(new BoolSetting("Ignore friends", true));
+    private final BoolSetting sprintingOnly = addSetting(new BoolSetting("Sprinting only", false));
+    private final BoolSetting hurtTimeFilter = addSetting(new BoolSetting("Hurt time filter", false));
+    private final SliderSetting hurtTime = addSetting(new SliderSetting("Hurt time", 1.0f, 0.0f, 10.0f));
+    private final BoolSetting holdingWeapon = addSetting(new BoolSetting("Holding weapon", false));
+    private final BoolSetting requireEntityHit = addSetting(new BoolSetting("RequireEntityHit", false));
+    private final BoolSetting requireLmb = addSetting(new BoolSetting("Require LMB", true));
+    private final BoolSetting requireRmb = addSetting(new BoolSetting("Require RMB", false));
+    private final BoolSetting checkPitch = addSetting(new BoolSetting("Check pitch", false));
+    private final BoolSetting verticalCheck = addSetting(new BoolSetting("Vertical check", false));
+    private final BoolSetting disableInWater = addSetting(new BoolSetting("Disable in water", false));
+    private final BoolSetting insideEntityHitbox = addSetting(new BoolSetting("Inside entity hitbox", false));
+    private final BoolSetting throughWalls = addSetting(new BoolSetting("Through walls", false));
+
+    // ==================== State ====================
+
+    /** Current locked target (persists across ticks for Single mode / TargetSwitchDelay). */
+    private Object lockedTarget;
+    /** Wall-clock ms of the last target switch, for TargetSwitchDelay. */
+    private long lastTargetSwitchMs;
+    /** The entity we are currently aiming at (may be null). */
+    private Object currentTarget;
+    /** Current smooth rotation foundation (last written yaw/pitch). */
+    private float smoothYaw;
+    private float smoothPitch;
+    /** Whether we have an active aim target this tick. */
+    private boolean hasTarget;
+
+    public AimAssistModule() {
+        super("Aim Assist", "Aims at players for you", Category.COMBAT);
+    }
+
+    @Override
+    public void onEnable() {
+        lockedTarget = null;
+        currentTarget = null;
+        lastTargetSwitchMs = 0L;
+        lastClickMs = System.currentTimeMillis();
+        hasTarget = false;
+        smoothYaw = 0f;
+        smoothPitch = 0f;
+    }
+
+    @Override
+    public void onDisable() {
+        lockedTarget = null;
+        currentTarget = null;
+        hasTarget = false;
+    }
+
+    // ==================== Tick-based aim (Timewarp faithful) ====================
+    //
+    // Timewarp's AimAssist runs in the client tick (not per-frame).
+    // Each tick:
+    //   1. Check conditions (GUI, in-game focus, weapon, LMB, sprint, water, pitch)
+    //   2. Select target via TargetHandler (FOV, range, filters, LOS check)
+    //   3. If no target or filters fail → stop
+    //   4. Compute raw target rotation toward aim point
+    //   5. smoothRotationHv: base + (target - base) * (speed / 100)
+    //   6. fixRotation: GCD snap so per-tick delta is a multiple of mouse sensitivity
+    //   7. Write rotationYaw / rotationPitch to EntityPlayer
+
+    @Override
+    public void onTick() {
+        if (!isEnabled() || !conditionsMet()) {
+            hasTarget = false;
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+
+        // Track physical LMB as a click source
+        if (McAccess.isPhysicalLmbDown())
+            lastClickMs = now;
+
+        // Hover delay: if no click from any source for HOVER_DELAY_MS, stop rotating
+        if (now - lastClickMs > HOVER_DELAY_MS) {
+            hasTarget = false;
+            return;
+        }
+
+        // === Target selection (Timewarp TargetHandler) ===
+        Object candidate = selectTarget();
+        if (candidate == null) {
+            currentTarget = null;
+            hasTarget = false;
+            if (targetingMode.getValue() == 2) // Single mode: unlock
+                lockedTarget = null;
+            return;
+        }
+
+        // Apply target switching logic
+        int mode = targetingMode.getValue();
+        if (mode == 2) {
+            // Single: lock to first target, never switch
+            if (lockedTarget != null && isValidCandidate(lockedTarget))
+                candidate = lockedTarget;
+            else
+                lockedTarget = candidate;
+        } else {
+            // TargetSwitchDelay: delay before switching to a different target
+            long switchDelay = targetSwitchDelay.getValue().longValue();
+            if (switchDelay > 0 && lockedTarget != null && candidate != lockedTarget
+                    && now - lastTargetSwitchMs < switchDelay)
+                candidate = lockedTarget;
+
+            if (candidate != lockedTarget) {
+                lastTargetSwitchMs = now;
+                lockedTarget = candidate;
+            }
+        }
+
+        currentTarget = candidate;
+
+        // Extra per-target filters (hurt time, vertical, inside hitbox, crosshair)
+        if (!passesTargetFilters(candidate)) {
+            hasTarget = false;
+            return;
+        }
+
+        // === Compute and apply rotation (tick-based, Timewarp faithful) ===
+        Object player = McAccess.thePlayer();
+        if (player == null) {
+            hasTarget = false;
+            return;
+        }
+
+        // Seed smooth values from current rotation on first tick after activation/resume
+        if (!hasTarget) {
+            smoothYaw = McAccess.getFloat(player, "field_70177_z");
+            smoothPitch = McAccess.getFloat(player, "field_70125_A");
+        }
+        hasTarget = true;
+
+        // Compute raw (unsmoothed) target rotation toward aim point
+        float baseYaw = smoothYaw;
+        float basePitch = smoothPitch;
+        double mp = aimMode.getValue() == 1 ? multipointOffset.getValue() : 0.0;
+        boolean blockWalls = !throughWalls.getValue();
+        float[] rawTarget = RavenRotationUtils.getRawRotationsToTarget(
+                candidate, mp, mp,
+                blockWalls, maximumRange.getValue(),
+                blockWalls, false);
+        if (rawTarget == null)
+            return;
+
+        // Timewarp smoothRotationHv: base + (target - base) * (speed / 100)
+        // with randomization jitter, then GCD fixRotation
+        int hSpeed = Math.round(horizontalSpeed.getValue());
+        int vSpeed = Math.round(verticalSpeed.getValue());
+        float[] result = RavenRotationUtils.smoothRotationHv(
+                baseYaw, basePitch,
+                rawTarget[0], rawTarget[1],
+                hSpeed, vSpeed, randomization.getValue());
+
+        float newYaw = result[0];
+        float newPitch = result[1];
+
+        // Write rotation to player entity
+        McAccess.setFloat(player, "field_70177_z", newYaw);
+        McAccess.setFloat(player, "field_70125_A", newPitch);
+
+        smoothYaw = newYaw;
+        smoothPitch = newPitch;
+    }
+
+    // ==================== Visuals (onRender / onOverlay) ====================
+
+    @Override
+    public void onRender(float partialTicks) {
+        // Target line rendering
+        if (!isEnabled() || currentTarget == null || !targetLine.getValue() || !McAccess.isInGame())
+            return;
+
+        Object player = McAccess.thePlayer();
+        if (player == null)
+            return;
+
+        double mp = aimMode.getValue() == 1 ? multipointOffset.getValue() : 0.0;
+        double[] eye = eyePos(player, partialTicks);
+        double[] aim = RavenRotationUtils.getAimPoint(currentTarget, mp, mp);
+        if (eye == null || aim == null)
+            return;
+
+        Object mc = McAccess.getMinecraft();
+        double[] vp = McAccess.getViewerPos(mc, partialTicks);
+        float r = targetLineColorR.getValue() / 255.0f;
+        float g = targetLineColorG.getValue() / 255.0f;
+        float b = targetLineColorB.getValue() / 255.0f;
+
+        RenderHelper.begin();
+        RenderHelper.drawLine3D(
+                eye[0] - vp[0], eye[1] - vp[1], eye[2] - vp[2],
+                aim[0] - vp[0], aim[1] - vp[1], aim[2] - vp[2],
+                r, g, b, 0.85f, targetLineThickness.getValue());
+        RenderHelper.end();
+    }
+
+    @Override
+    public void onOverlay(Object sr) {
+        if (!isEnabled() || !visualizeFov.getValue())
+            return;
+
+        int sw = invokeInt(sr, "func_78326_a");
+        int sh = invokeInt(sr, "func_78328_b");
+        if (sw < 1 || sh < 1)
+            return;
+
+        float fovVal = maximumFov.getValue();
+        if (fovVal >= 360.0f)
+            return;
+
+        float cx = sw * 0.5f;
+        float cy = sh * 0.5f;
+        float radius = (float) (Math.tan(Math.toRadians(fovVal * 0.5)) * (sh * 0.45));
+        radius = Math.max(20.0f, Math.min(radius, Math.min(sw, sh) * 0.48f));
+
+        float r = fovColorR.getValue() / 255.0f;
+        float g = fovColorG.getValue() / 255.0f;
+        float b = fovColorB.getValue() / 255.0f;
+
+        GL11.glPushAttrib(GL11.GL_ALL_ATTRIB_BITS);
+        GL11.glMatrixMode(GL11.GL_PROJECTION);
+        GL11.glPushMatrix();
+        GL11.glLoadIdentity();
+        GL11.glOrtho(0.0, sw, sh, 0.0, -1.0, 1.0);
+        GL11.glMatrixMode(GL11.GL_MODELVIEW);
+        GL11.glPushMatrix();
+        GL11.glLoadIdentity();
+
+        GL11.glDisable(GL11.GL_DEPTH_TEST);
+        GL11.glEnable(GL11.GL_BLEND);
+        GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
+        GL11.glDisable(GL11.GL_TEXTURE_2D);
+        GL11.glLineWidth(1.5f);
+        GL11.glColor4f(r, g, b, 0.75f);
+        GL11.glBegin(GL11.GL_LINE_LOOP);
+        int segments = 64;
+        for (int i = 0; i < segments; i++) {
+            double angle = (Math.PI * 2.0 * i) / segments;
+            GL11.glVertex2d(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+        }
+        GL11.glEnd();
+
+        GL11.glPopMatrix();
+        GL11.glMatrixMode(GL11.GL_PROJECTION);
+        GL11.glPopMatrix();
+        GL11.glMatrixMode(GL11.GL_MODELVIEW);
+        GL11.glPopAttrib();
+    }
+
+    // ==================== Condition helpers (Timewarp TargetHandler) ====================
+
+    private boolean conditionsMet() {
+        Object mc = McAccess.getMinecraft();
+        if (mc == null)
+            return false;
+        if (McAccess.currentScreen(mc) != null)
+            return false;
+
+        Object inGameHasFocus = McAccess.getObject(mc, "field_71415_G");
+        if (inGameHasFocus instanceof Boolean && !(Boolean) inGameHasFocus)
+            return false;
+
+        Object player = McAccess.thePlayer(mc);
+        if (player == null)
+            return false;
+
+        if (holdingWeapon.getValue() && !holdingWeapon(player))
+            return false;
+        if (requireLmb.getValue() && !isLeftMouseDown())
+            return false;
+        if (requireRmb.getValue() && !isRightMouseDown())
+            return false;
+        if (sprintingOnly.getValue() && !McAccess.isClientSprinting(player))
+            return false;
+        if (disableInWater.getValue() && isInWater(player))
+            return false;
+        if (checkPitch.getValue() && Math.abs(McAccess.getFloat(player, "field_70125_A")) > CHECK_PITCH_LIMIT)
+            return false;
+
+        return true;
+    }
+
+    private boolean passesTargetFilters(Object target) {
+        Object player = McAccess.thePlayer();
+        if (player == null || target == null)
+            return false;
+
+        // Hurt time filter
+        if (hurtTimeFilter.getValue()) {
+            int hurt = McAccess.getInt(target, "field_70737_aN");
+            if (hurt < hurtTime.getValue().intValue())
+                return false;
+        }
+
+        // Vertical check: limit pitch difference to target
+        if (verticalCheck.getValue()) {
+            float pitchDelta = (float) Math.abs(RavenRotationUtils.pitchDifference(target,
+                    McAccess.getFloat(player, "field_70125_A")));
+            if (pitchDelta > VERTICAL_CHECK_LIMIT)
+                return false;
+        }
+
+        // Inside entity hitbox: only aim if player's eye is inside target's AABB
+        if (insideEntityHitbox.getValue() && !isInsideTargetHitbox(player, target))
+            return false;
+
+        // Require entity hit: only aim if crosshair is directly on target
+        if (requireEntityHit.getValue() && !isCrosshairOnEntity(target))
+            return false;
+
+        return true;
+    }
+
+    /**
+     * Timewarp TargetHandler.selectTarget():
+     * - Iterates world loaded entities (EntityPlayer only)
+     * - Filters by alive, friends, invisible, range, FOV
+     * - Sorts by targeting mode (closest, lowest HP, angle, hurt time)
+     * - Validates aim point (LOS / multipoint)
+     * - Returns first valid candidate
+     */
+    private Object selectTarget() {
+        Object player = McAccess.thePlayer();
+        Object world = McAccess.theWorld();
+        if (player == null || world == null)
+            return null;
+
+        float viewYaw = McAccess.getFloat(player, "field_70177_z");
+        int fovVal = Math.round(maximumFov.getValue());
+        double rangeMaxVal = maximumRange.getValue();
+        double rangeMinVal = minimumRange.getValue();
+        double rangeMaxSq = rangeMaxVal * rangeMaxVal;
+        double rangeMinSq = rangeMinVal * rangeMinVal;
+
+        List<Object> candidates = new ArrayList<>();
+        Class<?> playerCls = McAccess.gameClass("net.minecraft.entity.player.EntityPlayer");
+        for (Object entity : McAccess.getWorldEntities(world)) {
+            if (entity == null || playerCls == null || !playerCls.isInstance(entity))
+                continue;
+            if (entity == player)
+                continue;
+            if (McAccess.getInt(entity, "field_70725_aQ") > 0) // death
+                continue;
+            if (ignoreFriends.getValue() && shouldFilterFriend(entity))
+                continue;
+            if (!aimAtInvisible.getValue() && isInvisible(entity))
+                continue;
+
+            double distSq = RavenRotationUtils.distanceSqFromEyeToClosestOnAabb(entity);
+            if (distSq > rangeMaxSq || distSq < rangeMinSq)
+                continue;
+            if (fovVal != 360 && !RavenRotationUtils.inFov(viewYaw, fovVal, RavenRotationUtils.angleToEntity(entity)))
+                continue;
+            candidates.add(entity);
+        }
+
+        if (candidates.isEmpty())
+            return null;
+
+        Comparator<Object> primary = buildTargetingComparator(player, viewYaw);
+        candidates.sort(primary);
+
+        double mp = aimMode.getValue() == 1 ? multipointOffset.getValue() : 0.0;
+        boolean blockWalls = !throughWalls.getValue();
+        for (Object candidate : candidates) {
+            if (!blockWalls && aimMode.getValue() == 0)
+                return candidate;
+            if (RavenRotationUtils.hasValidAimPoint(candidate, mp, mp, rangeMaxVal, blockWalls, false))
+                return candidate;
+        }
+        return null;
+    }
+
+    /**
+     * Check if an entity is still a valid target (for Single mode lock or
+     * TargetSwitchDelay persistence).
+     */
+    private boolean isValidCandidate(Object entity) {
+        Object player = McAccess.thePlayer();
+        if (player == null || entity == null || entity == player)
+            return false;
+        if (McAccess.getInt(entity, "field_70725_aQ") > 0)
+            return false;
+
+        float viewYaw = McAccess.getFloat(player, "field_70177_z");
+        int fovVal = Math.round(maximumFov.getValue());
+        double rangeMaxVal = maximumRange.getValue();
+        double rangeMinVal = minimumRange.getValue();
+        double distSq = RavenRotationUtils.distanceSqFromEyeToClosestOnAabb(entity);
+        if (distSq > rangeMaxVal * rangeMaxVal || distSq < rangeMinVal * rangeMinVal)
+            return false;
+        if (fovVal != 360 && !RavenRotationUtils.inFov(viewYaw, fovVal, RavenRotationUtils.angleToEntity(entity)))
+            return false;
+
+        double mp = aimMode.getValue() == 1 ? multipointOffset.getValue() : 0.0;
+        boolean blockWalls = !throughWalls.getValue();
+        return RavenRotationUtils.hasValidAimPoint(entity, mp, mp, rangeMaxVal, blockWalls, false);
+    }
+
+    private boolean shouldFilterFriend(Object entity) {
+        // Friends list module not ported — Ignore friends is a no-op until Friends module exists
+        return false;
+    }
+
+    private Comparator<Object> buildTargetingComparator(Object player, float viewYaw) {
+        switch (targetingMode.getValue()) {
+            case 1: // Lowest HP
+                return Comparator.comparingDouble(this::entityHealth);
+            case 2: // Single
+            case 3: // Switch
+            case 0: // Closest
+            default:
+                return Comparator.comparingDouble(RavenRotationUtils::distanceSqFromEyeToClosestOnAabb);
+        }
+    }
+
+    private double entityHealth(Object entity) {
+        Object hp = McAccess.invoke(entity, "func_110143_aJ", new Class<?>[0]);
+        float health = hp instanceof Float ? (Float) hp : 0.0f;
+        return health;
+    }
+
+    // ==================== Static helpers ====================
+
+    private static boolean holdingWeapon(Object player) {
+        Object stack = McAccess.invoke(player, "func_70694_bm", new Class<?>[0]);
+        if (stack == null)
+            return false;
+        Object item = McAccess.invoke(stack, "func_77973_b", new Class<?>[0]);
+        if (item == null)
+            return false;
+        Class<?> sword = McAccess.gameClass("net.minecraft.item.ItemSword");
+        Class<?> axe = McAccess.gameClass("net.minecraft.item.ItemAxe");
+        return (sword != null && sword.isInstance(item)) || (axe != null && axe.isInstance(item));
+    }
+
+    private static boolean isLeftMouseDown() {
+        return McAccess.isPhysicalLmbDown();
+    }
+
+    private static boolean isRightMouseDown() {
+        return McAccess.isPhysicalRmbDown();
+    }
+
+    private static boolean isInvisible(Object entity) {
+        Object r = McAccess.invoke(entity, "func_82150_aj", new Class<?>[0]);
+        return r instanceof Boolean && (Boolean) r;
+    }
+
+    private static boolean isInWater(Object player) {
+        Object r = McAccess.invoke(player, "func_70090_H", new Class<?>[0]);
+        return r instanceof Boolean && (Boolean) r;
+    }
+
+    private static boolean isInsideTargetHitbox(Object player, Object target) {
+        double[] eye = eyePos(player, 1.0f);
+        Object bb = McAccess.invoke(target, "func_174813_aQ", new Class<?>[0]);
+        if (eye == null || bb == null)
+            return false;
+        Object vec = McAccess.newInstance("net.minecraft.util.Vec3",
+                new Class<?>[] { double.class, double.class, double.class }, eye[0], eye[1], eye[2]);
+        if (vec == null)
+            return false;
+        Object inside = McAccess.invoke(bb, "func_72316_a",
+                new Class<?>[] { McAccess.gameClass("net.minecraft.util.Vec3") }, vec);
+        return inside instanceof Boolean && (Boolean) inside;
+    }
+
+    private static boolean isCrosshairOnEntity(Object target) {
+        Object mop = McAccess.objectMouseOver();
+        if (mop == null)
+            return false;
+        Object hit = McAccess.getObject(mop, "field_72308_g");
+        return hit == target;
+    }
+
+    private static double[] eyePos(Object player, float partialTicks) {
+        Object vec = McAccess.invoke(player, "func_174824_e", new Class<?>[] { float.class }, partialTicks);
+        if (vec == null)
+            return null;
+        return new double[] {
+                McAccess.getDouble(vec, "field_72450_a"),
+                McAccess.getDouble(vec, "field_72448_b"),
+                McAccess.getDouble(vec, "field_72449_c")
+        };
+    }
+
+    private static int invokeInt(Object target, String method) {
+        Object r = McAccess.invoke(target, method, new Class<?>[0]);
+        if (r instanceof Integer)
+            return (Integer) r;
+        return 0;
+    }
+}

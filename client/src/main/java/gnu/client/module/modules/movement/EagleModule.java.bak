@@ -1,0 +1,299 @@
+package gnu.client.module.modules.movement;
+
+import gnu.client.module.Category;
+import gnu.client.module.Module;
+import gnu.client.module.modules.combat.JumpResetModule;
+import gnu.client.module.modules.combat.WTapModule;
+import gnu.client.module.setting.BoolSetting;
+import gnu.client.module.setting.SliderSetting;
+import gnu.client.runtime.mc.McAccess;
+
+import java.lang.reflect.Field;
+
+/**
+ * Auto-sneak at block edges while bridging. Ported from RainClient {@code Eagle}
+ * (edge-offset Chebyshev probe + hysteresis + release delay).
+ *
+ * Actuation uses JVMTI-patched {@code MovementInputFromOptions.updatePlayerMoveState()}:
+ * {@link #patchMovementInput} runs at each RETURN to apply {@link #forceSneak} /
+ * {@link #suppressSneak} and fix the 0.3x moveForward/moveStrafe scaling.
+ * {@code EntityPlayerSP.setSneaking} is driven separately for server sneak sync.
+ *
+ * SRG (1.8.9): onGround=field_70122_E, pitch=field_70125_A (Entity);
+ * getEntityBoundingBox=func_174813_aQ; AABB min/max =
+ * field_72340_a/field_72336_d/field_72338_b/field_72337_e/field_72339_c/field_72334_f;
+ * World.isAirBlock=func_175623_d(BlockPos); keyBindSneak=field_74311_E,
+ * KeyBinding.isKeyDown=func_151470_d; sneak=field_78899_d; moveForward=field_78902_a;
+ * moveStrafe=field_78900_b (MovementInput, 1.8.9 SRG).
+ */
+public final class EagleModule extends Module {
+
+    public static volatile boolean forceSneak = false;
+    /** When true, vanilla shift sneak is cleared before {@link #forceSneak} is applied. */
+    public static volatile boolean suppressSneak = false;
+
+    private static volatile boolean movementFieldsResolved = false;
+    private static Field cachedSneakField;
+    private static Field cachedMoveForwardField;
+    private static Field cachedMoveStrafeField;
+
+    private final SliderSetting edgeOffset = addSetting(new SliderSetting("Edge Offset", 0.05f, 0.0f, 0.3f));
+    private final SliderSetting releaseDelay = addSetting(new SliderSetting("Release Delay", 3.0f, 0.0f, 10.0f));
+    private final BoolSetting pitchCheck = addSetting(new BoolSetting("Pitch Check", true));
+    private final BoolSetting sneakOnly = addSetting(new BoolSetting("Sneak Only", false));
+
+    private boolean currentlySneaking = false;
+    private int releaseDelayTicks = 0;
+
+    public EagleModule() {
+        super("Eagle", "Auto-sneak at block edges while bridging", Category.PLAYER);
+    }
+
+    @Override
+    public void onEnable() {}
+
+    @Override
+    public void onDisable() {
+        currentlySneaking = false;
+        releaseDelayTicks = 0;
+        forceSneak = false;
+        suppressSneak = false;
+        applySetSneaking(McAccess.thePlayer());
+    }
+
+    @Override
+    public void onTick() {
+        if (!isEnabled()) {
+            forceSneak = false;
+            suppressSneak = false;
+            return;
+        }
+
+        Object player = McAccess.thePlayer();
+        Object world = McAccess.theWorld();
+        if (player == null || world == null) {
+            forceSneak = false;
+            suppressSneak = false;
+            return;
+        }
+
+        if (!McAccess.getBool(player, "field_70122_E")) { // onGround
+            currentlySneaking = false;
+            releaseDelayTicks = 0;
+            forceSneak = false;
+            suppressSneak = false;
+            applySetSneaking(player);
+            return;
+        }
+
+        // Gate 1: pitch check — when it fails Eagle does nothing; shift works normally.
+        if (pitchCheck.getValue()) {
+            float pitch = McAccess.getFloat(player, "field_70125_A"); // rotationPitch
+            if (pitch < 69.0f) {
+                currentlySneaking = false;
+                releaseDelayTicks = 0;
+                forceSneak = false;
+                suppressSneak = false;
+                applySetSneaking(player);
+                return;
+            }
+        }
+
+        boolean nearEdge = computeNearEdge(player, world);
+
+        // Gate 2: sneak only — suppress vanilla shift unless near an edge.
+        if (sneakOnly.getValue()) {
+            boolean shiftHeld = isPhysicalSneakHeld();
+            if (shiftHeld) {
+                suppressSneak = true;
+                forceSneak = nearEdge;
+            } else {
+                suppressSneak = false;
+                forceSneak = false;
+            }
+        } else {
+            suppressSneak = false;
+            forceSneak = nearEdge;
+        }
+
+        applySetSneaking(player);
+    }
+
+    /**
+     * Called from JVMTI-patched {@code updatePlayerMoveState} at every RETURN.
+     * Vanilla applies 0.3x move scaling before RETURN; this reconciles sneak state
+     * and movement fields when Eagle overrides sneak after vanilla ran.
+     */
+    public static void patchMovementInput(Object movInput) {
+        if (movInput == null)
+            return;
+        try {
+            ensureMovementFields(movInput.getClass());
+            if (cachedSneakField == null || cachedMoveForwardField == null || cachedMoveStrafeField == null)
+                return;
+
+            boolean vanillaSneak = cachedSneakField.getBoolean(movInput);
+            float moveForward = cachedMoveForwardField.getFloat(movInput);
+            float moveStrafe = cachedMoveStrafeField.getFloat(movInput);
+
+            boolean finalSneak = vanillaSneak;
+            if (suppressSneak)
+                finalSneak = false;
+            if (forceSneak)
+                finalSneak = true;
+
+            if (!vanillaSneak && finalSneak) {
+                moveForward *= 0.3F;
+                moveStrafe *= 0.3F;
+            } else if (vanillaSneak && !finalSneak) {
+                if (moveForward != 0f)
+                    moveForward /= 0.3F;
+                if (moveStrafe != 0f)
+                    moveStrafe /= 0.3F;
+            }
+
+            cachedSneakField.setBoolean(movInput, finalSneak);
+            cachedMoveForwardField.setFloat(movInput, moveForward);
+            cachedMoveStrafeField.setFloat(movInput, moveStrafe);
+
+            JumpResetModule.patchMovementInput(movInput);
+            WTapModule.patchMovementInput(movInput);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void ensureMovementFields(Class<?> cls) {
+        if (movementFieldsResolved)
+            return;
+        synchronized (EagleModule.class) {
+            if (movementFieldsResolved)
+                return;
+            cachedSneakField = findField(cls, "sneak", "field_78899_d");
+            cachedMoveForwardField = findField(cls, "moveForward", "field_78902_a");
+            cachedMoveStrafeField = findField(cls, "moveStrafe", "field_78900_b");
+            movementFieldsResolved = true;
+        }
+    }
+
+    private static Field findField(Class<?> start, String... names) {
+        for (String name : names) {
+            for (Class<?> cls = start; cls != null; cls = cls.getSuperclass()) {
+                try {
+                    Field f = cls.getDeclaredField(name);
+                    f.setAccessible(true);
+                    return f;
+                } catch (NoSuchFieldException ignored) {
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Speed reduction + server sync via Entity.setSneaking (separate from movementInput.sneak). */
+    private static void applySetSneaking(Object player) {
+        if (player == null)
+            return;
+        try {
+            if (forceSneak) {
+                McAccess.setSneaking(player, true);
+            } else if (suppressSneak) {
+                McAccess.setSneaking(player, false);
+            } else {
+                McAccess.setSneaking(player, false);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** Edge probe + hysteresis (normal mode) or exact-edge boolean (sneakOnly mode). */
+    private boolean computeNearEdge(Object player, Object world) {
+        Object aabb = McAccess.invoke(player, "func_174813_aQ", new Class<?>[0]);
+        if (aabb == null) {
+            currentlySneaking = false;
+            releaseDelayTicks = 0;
+            return false;
+        }
+
+        double minX = McAccess.getDouble(aabb, "field_72340_a");
+        double maxX = McAccess.getDouble(aabb, "field_72336_d");
+        double minY = McAccess.getDouble(aabb, "field_72338_b");
+        double minZ = McAccess.getDouble(aabb, "field_72339_c");
+        double maxZ = McAccess.getDouble(aabb, "field_72334_f");
+
+        int by = (int) Math.floor(minY - 0.01);
+        double cx = (minX + maxX) * 0.5;
+        double cz = (minZ + maxZ) * 0.5;
+
+        int bxLo = (int) Math.floor(minX);
+        int bxHi = (int) Math.floor(maxX);
+        int bzLo = (int) Math.floor(minZ);
+        int bzHi = (int) Math.floor(maxZ);
+
+        boolean hasGround = false;
+        double minDist = Double.POSITIVE_INFINITY;
+
+        for (int bx = bxLo; bx <= bxHi; bx++) {
+            for (int bz = bzLo; bz <= bzHi; bz++) {
+                if (isAirBlock(world, bx, by, bz))
+                    continue;
+                hasGround = true;
+                double closestX = clamp(cx, bx, bx + 1.0);
+                double closestZ = clamp(cz, bz, bz + 1.0);
+                double dist = Math.max(Math.abs(cx - closestX), Math.abs(cz - closestZ));
+                if (dist < minDist)
+                    minDist = dist;
+            }
+        }
+
+        float edge = edgeOffset.getValue();
+
+        if (sneakOnly.getValue()) {
+            currentlySneaking = false;
+            releaseDelayTicks = 0;
+            return hasGround && minDist > edge + 0.05f;
+        }
+
+        if (!hasGround || minDist == 0.0) {
+            currentlySneaking = false;
+        } else {
+            if (!currentlySneaking && minDist > edge + 0.05)
+                currentlySneaking = true;
+            if (currentlySneaking && minDist < edge - 0.02)
+                currentlySneaking = false;
+        }
+
+        if (currentlySneaking || (hasGround && minDist > edge)) {
+            releaseDelayTicks = releaseDelay.getValue().intValue();
+        } else if (releaseDelayTicks > 0) {
+            releaseDelayTicks--;
+        }
+
+        return currentlySneaking || releaseDelayTicks > 0;
+    }
+
+    private static boolean isPhysicalSneakHeld() {
+        Object keyBindSneak = McAccess.getObject(McAccess.gameSettings(), "field_74311_E");
+        if (keyBindSneak == null)
+            return false;
+        Object down = McAccess.invoke(keyBindSneak, "func_151470_d", new Class<?>[0]); // isKeyDown
+        return down instanceof Boolean && (Boolean) down;
+    }
+
+    private static boolean isAirBlock(Object world, int x, int y, int z) {
+        Object pos = McAccess.newInstance("net.minecraft.util.BlockPos",
+                new Class<?>[] { int.class, int.class, int.class }, x, y, z);
+        if (pos == null)
+            return true;
+        Class<?> blockPosCls = McAccess.gameClass("net.minecraft.util.BlockPos");
+        Object r = McAccess.invoke(world, "func_175623_d", new Class<?>[] { blockPosCls }, pos);
+        return !(r instanceof Boolean) || (Boolean) r;
+    }
+
+    private static double clamp(double v, double lo, double hi) {
+        if (v < lo)
+            return lo;
+        if (v > hi)
+            return hi;
+        return v;
+    }
+}

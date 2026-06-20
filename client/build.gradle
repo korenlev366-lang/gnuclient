@@ -1,0 +1,65 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '7.1.2'
+}
+
+group = 'gnu.client'
+version = '1.0.0'
+
+sourceCompatibility = JavaVersion.VERSION_1_8
+targetCompatibility = JavaVersion.VERSION_1_8
+
+tasks.withType(JavaCompile).configureEach {
+    sourceCompatibility = '1.8'
+    targetCompatibility = '1.8'
+}
+
+def prismLibs = System.getenv('PRISM_LIBS') ?: "${System.getProperty('user.home')}/.local/share/PrismLauncher/libraries"
+def loomCache = "${System.getProperty('user.home')}/.gradle/caches/essential-loom"
+def minecraftSrgJar = fileTree(loomCache) {
+    include '**/minecraft-srg.jar'
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.minecraftforge.net' }
+}
+
+dependencies {
+    // Maven coords for IDE/docs; transitive=false avoids unresolved lwjgl nightly on Central
+    compileOnly("net.minecraftforge:forge:1.8.9-11.15.1.2318-1.8.9:universal") {
+        transitive = false
+    }
+    compileOnly files(
+        "${prismLibs}/net/minecraftforge/forge/1.8.9-11.15.1.2318-1.8.9/forge-1.8.9-11.15.1.2318-1.8.9-universal.jar",
+        "${prismLibs}/net/minecraft/launchwrapper/1.12/launchwrapper-1.12.jar",
+        "${prismLibs}/com/mojang/minecraft/1.8.9/minecraft-1.8.9-client.jar",
+        "${prismLibs}/org/lwjgl/lwjgl/lwjgl/2.9.4-nightly-20150209/lwjgl-2.9.4-nightly-20150209.jar",
+        "${prismLibs}/com/google/guava/guava/17.0/guava-17.0.jar"
+    )
+    compileOnly minecraftSrgJar
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'org.ow2.asm:asm:9.6'
+}
+
+// The jar is loaded onto Forge's LaunchClassLoader by the native agent
+// (gnu-agent.so) via URLClassLoader.addURL; no Java agent manifest is required.
+def installJar = file("${projectDir}/../install/lib/gnu-client.jar")
+
+shadowJar {
+    archiveFileName = 'gnu-client.jar'
+    mergeServiceFiles()
+    relocate 'org.objectweb.asm', 'gnu.client.shadow.asm'
+    doLast {
+        installJar.parentFile.mkdirs()
+        copy {
+            from archiveFile.get()
+            into installJar.parentFile
+            rename { 'gnu-client.jar' }
+        }
+    }
+}
+
+tasks.named('build') {
+    dependsOn tasks.named('shadowJar')
+}

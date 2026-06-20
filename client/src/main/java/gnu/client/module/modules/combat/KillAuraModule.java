@@ -1,0 +1,116 @@
+package gnu.client.module.modules.combat;
+
+import gnu.client.module.Category;
+import gnu.client.module.Module;
+import gnu.client.module.setting.SliderSetting;
+import gnu.client.module.ModuleManager;
+import gnu.client.module.modules.combat.HitSelectModule;
+import gnu.client.runtime.mc.McAccess;
+
+import java.util.List;
+
+/**
+ * Attacks the nearest player in range. Ported from RainClient {@code KillAura}
+ * (nearest-in-sphere; no FOV/team/death filtering — parity gap noted upstream).
+ *
+ * Attack goes through PlayerControllerMP.attackEntity (SRG func_78764_a) rather
+ * than the literal EntityPlayer.attackTargetEntityWithCurrentItem: the controller
+ * path is what sends the C02PacketUseEntity(ATTACK) to the server (and internally
+ * calls attackTargetEntityWithCurrentItem). Calling the latter alone does not hit
+ * on a server.
+ *
+ * SRG (1.8.9): playerEntities=field_73010_i (WorldClient); entity x/y/z =
+ * field_70165_t/field_70163_u/field_70161_v (Entity).
+ */
+public final class KillAuraModule extends Module {
+
+    private final SliderSetting range = addSetting(new SliderSetting("Range", 4.0f, 2.0f, 6.0f));
+    private final SliderSetting cps = addSetting(new SliderSetting("CPS", 10.0f, 1.0f, 20.0f));
+
+    private long lastAttackMs = 0L;
+
+    public KillAuraModule() {
+        super("KillAura", "Attacks nearest player in range", Category.COMBAT);
+    }
+
+    @Override
+    public void onEnable() {}
+
+    @Override
+    public void onDisable() {}
+
+    @Override
+    public void onTick() {
+        Object player = McAccess.thePlayer();
+        Object world = McAccess.theWorld();
+        if (player == null || world == null)
+            return;
+
+        long now = System.currentTimeMillis();
+        long intervalMs = (long) (1000.0f / cps.getValue());
+        if (now - lastAttackMs < intervalMs)
+            return;
+
+        // Skip attack if AutoClicker is enabled — it generates real X11 clicks
+        // that the game processes as separate attacks, causing MultiActionsA.
+        Module autoClicker = ModuleManager.INSTANCE.getModule("AutoClicker");
+        if (autoClicker != null && autoClicker.isEnabled())
+            return;
+
+        Class<?> playerCls = McAccess.gameClass("net.minecraft.entity.player.EntityPlayer");
+        if (playerCls == null)
+            return;
+
+        List<?> players = McAccess.getWorldEntitiesFiltered(world);
+        if (players.isEmpty())
+            return;
+
+        double px = McAccess.getDouble(player, "field_70165_t");
+        double py = McAccess.getDouble(player, "field_70163_u");
+        double pz = McAccess.getDouble(player, "field_70161_v");
+
+        double bestDist = range.getValue();
+        Object bestEntity = null;
+
+        for (Object entity : players) {
+            if (entity == null || !playerCls.isInstance(entity))
+                continue;
+
+            double ex = McAccess.getDouble(entity, "field_70165_t");
+            double ey = McAccess.getDouble(entity, "field_70163_u");
+            double ez = McAccess.getDouble(entity, "field_70161_v");
+
+            double dx = ex - px;
+            double dy = ey - py;
+            double dz = ez - pz;
+            double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+            if (dist < 0.1)
+                continue; // self
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestEntity = entity;
+            }
+        }
+
+        if (bestEntity == null)
+            return;
+
+        if (HitSelectModule.shouldBlockClick())
+            return;
+
+        Object controller = McAccess.playerController();
+        if (controller == null)
+            return;
+
+        Class<?> entityCls = McAccess.gameClass("net.minecraft.entity.Entity");
+        McAccess.invoke(controller, "func_78764_a",
+                new Class<?>[] { playerCls, entityCls }, player, bestEntity);
+
+        // Swing animation (cosmetic + some anticheats expect it). func_71038_i = swingItem.
+        McAccess.invoke(player, "func_71038_i", new Class<?>[0]);
+
+        lastAttackMs = now;
+        AimAssistModule.lastClickMs = now;
+    }
+}

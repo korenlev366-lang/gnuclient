@@ -1,0 +1,473 @@
+package gnu.client.module.modules.visual;
+
+import gnu.client.module.Category;
+import gnu.client.module.Module;
+import gnu.client.module.ModuleManager;
+import gnu.client.module.setting.BoolSetting;
+import gnu.client.module.setting.SliderSetting;
+import gnu.client.runtime.mc.McAccess;
+import gnu.client.runtime.packet.PacketEvents;
+import gnu.client.runtime.packet.PacketHelper;
+import gnu.client.runtime.packet.PacketListener;
+
+/**
+ * Free Look — render-path camera override via {@code CameraHook}.
+ *
+ * <p>Unlike the tick-based approach (which had a three-writer race between vanilla
+ * setAngles, onTickStart rotation restore, and onTick camera write), this implementation
+ * hands all rotation management to {@code CameraHook}, which fires inside
+ * {@code EntityRenderer.renderWorldPass} on the render thread:
+ *
+ * <ol>
+ *   <li><strong>beforeRenderWorldPass</strong> — reads the player rotation AFTER vanilla
+ *       mouse processing has already written the frame's mouse delta, accumulates that
+ *       delta into independent {@code cameraYaw/cameraPitch}, then writes camera angles
+ *       back so that {@code orientCamera()} uses the freelook view direction.</li>
+ *   <li><strong>afterRenderWorldPass</strong> — restores player rotation to the original
+ *       frozen facing direction for movement and packet sending.</li>
+ * </ol>
+ *
+ * <p>Because CameraHook fires on the render thread with no concurrent writers, there
+ * is no jitter or race condition. The tick methods ({@code onTickStart}, {@code onTick})
+ * no longer touch player rotation or mouse helper state.
+ *
+ * <p>Module retains: perspective management (third-person enter/exit, FOV), packet
+ * interceptor (outbound C03/C05/C06 yaw/pitch overwritten with original), hold-mode
+ * key handling, and {@code onRender} RenderManager playerViewY/X override for entity
+ * billboard rendering.
+ *
+ * <p>Settings mirror Raven's Freelook: Hold, Invert pitch, Lock pitch,
+ * Custom FOV. Default key = L (LWJGL 56).
+ */
+public final class FreeLookModule extends Module implements PacketListener {
+
+    // Default LWJGL key code for 'L' = 56 (same as Raven)
+    private static final int DEFAULT_KEY = 56;
+
+    // SRG field names (MCP 1.8.9 stable_22)
+    private static final String FIELD_ROTATION_YAW = "field_70177_z";
+    private static final String FIELD_ROTATION_PITCH = "field_70125_A";
+    private static final String FIELD_THIRD_PERSON_VIEW = "field_74320_O";
+    private static final String FIELD_FOV_SETTING = "field_74334_X";
+
+    // Minecraft.mouseHelper SRG (only used by resetPerspective for grabMouseCursor)
+    private static final String FIELD_MOUSE_HELPER = "field_71417_B";
+
+    // C03PacketPlayer SRG field names (for packet interceptor)
+    private static final String FIELD_C03_YAW = "field_149476_e";
+    private static final String FIELD_C03_PITCH = "field_149473_f";
+
+    // RenderGlobal SRG (for setDisplayListEntitiesDirty)
+    private static final String FIELD_RENDER_GLOBAL = "field_71437_Z";
+    // EntityRenderer SRG method for loadEntityShader
+    private static final String METHOD_LOAD_ENTITY_SHADER = "func_175022_a";
+
+    // ── Settings (mirrors Raven Freelook.java) ────────────────────────────
+
+    private final BoolSetting hold = addSetting(new BoolSetting("Hold", true));
+    private final BoolSetting invertPitch = addSetting(new BoolSetting("Invert pitch", false));
+    private final BoolSetting lockPitch = addSetting(new BoolSetting("Lock pitch", true));
+    private final BoolSetting customFov = addSetting(new BoolSetting("Custom FOV", false));
+    private final SliderSetting fov = addSetting(new SliderSetting("FOV", 90.0f, 10.0f, 150.0f));
+
+    // ── State ─────────────────────────────────────────────────────────────
+
+    /** Whether the freelook perspective is currently active. */
+    private boolean perspectiveToggled;
+
+    /** Independent camera angles (accumulated from mouse deltas each frame). */
+    private float cameraYaw;
+    private float cameraPitch;
+
+    /**
+     * The ORIGINAL player facing direction — captured once on enable and
+     * NEVER changed while freelook is active. Movement uses this direction
+     * (restored by CameraHook.afterRenderWorldPass). Packets use this direction
+     * (intercepted).
+     */
+    private float originalYaw;
+    private float originalPitch;
+
+    /** The third-person view mode we saved (0=first, 1=back, 2=front). */
+    private int previousPerspective;
+
+    /** Original FOV value to restore on disable. */
+    private float lastFov;
+
+    /** Edge-trigger tracking for key press (Raven pattern: prevKeyState). */
+    private boolean prevKeyDown;
+
+    // ── Construction ──────────────────────────────────────────────────────
+
+    public FreeLookModule() {
+        super("FreeLook", "Look around in third-person without changing player rotation",
+                Category.VISUALS);
+        setKeyCode(DEFAULT_KEY);
+        fov.setVisible(customFov.getValue());
+    }
+
+    // ── Module lifecycle ─────────────────────────────────────────────────
+
+    @Override
+    public void onEnable() {
+        if (!canFreelook()) {
+            setEnabled(false);
+            return;
+        }
+
+        // Save current rotation as both original facing and initial camera position
+        originalYaw = getPlayerYaw();
+        originalPitch = getPlayerPitch();
+        cameraYaw = originalYaw;
+        cameraPitch = originalPitch;
+
+        // Save current perspective and FOV
+        previousPerspective = getThirdPersonView();
+        lastFov = getFovSetting();
+
+        // Switch to third-person back view (Raven: enterPerspective → applyThirdPersonView(1))
+        applyThirdPersonView(1);
+
+        // Register packet interceptor — overwrite C03/C05/C06 yaw/pitch with original facing
+        PacketEvents.register(this);
+
+        perspectiveToggled = true;
+        prevKeyDown = true;
+    }
+
+    @Override
+    public void onDisable() {
+        PacketEvents.unregister(this);
+        if (perspectiveToggled) {
+            perspectiveToggled = false;
+            resetPerspective();
+        }
+        prevKeyDown = false;
+    }
+
+    // ── Tick handlers (CameraHook-driven — no rotation writes here) ──────
+
+    @Override
+    public void onTickStart() {
+        // Rotation management is handled entirely by CameraHook in the render
+        // path. No need to restore rotation here — afterRenderWorldPass already
+        // restored it before this tick started.
+    }
+
+    @Override
+    public void onTick() {
+        if (!canFreelook()) {
+            if (perspectiveToggled) {
+                setEnabled(false);
+            }
+            return;
+        }
+
+        // ── Hold mode: edge-triggered key check (Raven pattern: onPressed) ──
+        boolean keyDown = isFreelookKeyHeld();
+        if (keyDown != prevKeyDown) {
+            if (!isEnabled()) {
+                if (perspectiveToggled) {
+                    resetPerspective();
+                }
+                prevKeyDown = keyDown;
+                return;
+            }
+            if (keyDown) {
+                if (!perspectiveToggled) {
+                    originalYaw = getPlayerYaw();
+                    originalPitch = getPlayerPitch();
+                    cameraYaw = originalYaw;
+                    cameraPitch = originalPitch;
+                    enterPerspective();
+                }
+            } else {
+                if (hold.getValue() && perspectiveToggled) {
+                    resetPerspective();
+                    perspectiveToggled = false;
+                    setEnabled(false);
+                }
+            }
+            prevKeyDown = keyDown;
+            return;
+        }
+
+        if (!perspectiveToggled) {
+            return;
+        }
+
+        // Camera angle accumulation is done by CameraHook.beforeRenderWorldPass()
+        // on the render thread. Here we only handle non-rotation upkeep:
+
+        // Apply custom FOV (Raven: if customFov.isToggled)
+        if (customFov.getValue()) {
+            setFovSetting(fov.getValue());
+        }
+
+        // Ensure third-person view is still active
+        if (getThirdPersonView() != 1) {
+            applyThirdPersonView(1);
+        }
+    }
+
+    // ── Packet interceptor (prevents freelook rotation from leaking to server) ──
+    //
+    // CameraHook writes cameraYaw/cameraPitch into player rotation for orientCamera,
+    // so outgoing packets see camera angles. We overwrite them with originalYaw/
+    // originalPitch here.
+
+    @Override
+    public boolean onSend(Object packet) {
+        if (perspectiveToggled && PacketHelper.isPlayerMovement(packet)) {
+            McAccess.setFloat(packet, FIELD_C03_YAW, originalYaw);
+            McAccess.setFloat(packet, FIELD_C03_PITCH, originalPitch);
+        }
+        return false;
+    }
+
+    @Override
+    public boolean onReceive(Object packet) {
+        return false;
+    }
+
+    // ── Render override ──────────────────────────────────────────────────
+
+    @Override
+    public void onRender(float partialTicks) {
+        if (!perspectiveToggled)
+            return;
+
+        Object renderManager = McAccess.getRenderManager();
+        if (renderManager != null) {
+            // playerViewY = camera yaw (horizontal) — SRG field_78735_i
+            McAccess.setFloat(renderManager, "field_78735_i", cameraYaw);
+            // playerViewX = camera pitch (vertical) — SRG field_78732_j
+            McAccess.setFloat(renderManager, "field_78732_j", cameraPitch);
+        }
+    }
+
+    // ── Public API for CameraHook ────────────────────────────────────────
+
+    /** Whether the freelook third-person perspective is currently active. */
+    public boolean isPerspectiveActive() {
+        return perspectiveToggled;
+    }
+
+    /** Current freelook camera yaw (accumulated from mouse deltas). */
+    public float getCameraYaw() {
+        return cameraYaw;
+    }
+
+    /** Current freelook camera pitch (accumulated from mouse deltas). */
+    public float getCameraPitch() {
+        return cameraPitch;
+    }
+
+    /**
+     * The frozen original yaw — the player's facing direction captured when
+     * freelook was enabled or last re-entered.
+     */
+    public float getOriginalYaw() {
+        return originalYaw;
+    }
+
+    /**
+     * The frozen original pitch — the player's facing direction captured when
+     * freelook was enabled or last re-entered.
+     */
+    public float getOriginalPitch() {
+        return originalPitch;
+    }
+
+    /**
+     * Accumulate mouse delta into independent camera angles. Called by
+     * {@code CameraHook.beforeRenderWorldPass()} on the render thread AFTER
+     * vanilla mouse processing has already written the frame's mouse delta
+     * into the player's real rotation.
+     *
+     * <p>{@code currentYaw/currentPitch} = the player's rotation AFTER vanilla
+     * mouse processing this frame. {@code delta = current - original} so that
+     * cumulative mouse movement since freelook entered is captured, handling
+     * yaw wrap via {@code % 360}.
+     *
+     * <p>Applies invertPitch and lockPitch settings (same logic as the old
+     * tick-based approach).
+     */
+    public void accumulateCameraDelta(float currentYaw, float currentPitch) {
+        // delta = current - original, wrap yaw to [-180, 180] to handle 0/360 crossing
+        float deltaYaw = currentYaw - originalYaw;
+        deltaYaw = deltaYaw % 360.0f;
+        if (deltaYaw >= 180.0f)  deltaYaw -= 360.0f;
+        if (deltaYaw < -180.0f)  deltaYaw += 360.0f;
+
+        float deltaPitch = currentPitch - originalPitch;
+
+        cameraYaw += deltaYaw;
+        cameraPitch += deltaPitch;
+
+        // Raven invert pitch: negate the accumulated pitch component
+        if (invertPitch.getValue()) {
+            cameraPitch -= 2.0f * deltaPitch;
+        }
+
+        // Raven: clamp to -90..90 if lockPitch is on
+        if (lockPitch.getValue()) {
+            cameraPitch = Math.max(-90.0f, Math.min(90.0f, cameraPitch));
+        }
+    }
+
+    // ── Key detection (Raven pattern: LWJGL Keyboard.isKeyDown) ──────────
+
+    private boolean isFreelookKeyHeld() {
+        int code = getKeyCode();
+        if (code < 0)
+            return false;
+        try {
+            ClassLoader cl = McAccess.gameLoader();
+            if (cl == null)
+                return false;
+            Class<?> keyboard = Class.forName("org.lwjgl.input.Keyboard", false, cl);
+            Object result = keyboard.getMethod("isKeyDown", int.class).invoke(null, code);
+            return result instanceof Boolean && (Boolean) result;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    // ── Prerequisites ─────────────────────────────────────────────────────
+
+    /** Can we enter freelook right now? (Raven: nullCheck + Freecam guard) */
+    private boolean canFreelook() {
+        if (!McAccess.isInGame())
+            return false;
+        Module freecam = ModuleManager.INSTANCE.getModule("Freecam");
+        if (freecam != null && freecam.isEnabled())
+            return false;
+        return true;
+    }
+
+    // ── Perspective management (Raven parity) ────────────────────────────
+
+    private void enterPerspective() {
+        cameraYaw = getPlayerYaw();
+        cameraPitch = getPlayerPitch();
+        previousPerspective = getThirdPersonView();
+        lastFov = getFovSetting();
+        applyThirdPersonView(1);
+        perspectiveToggled = true;
+    }
+
+    private void resetPerspective() {
+        perspectiveToggled = false;
+        applyThirdPersonView(previousPerspective);
+
+        // Raven: grab mouse cursor if in-game and no screen
+        Object mc = McAccess.getMinecraft();
+        if (mc != null && McAccess.currentScreen(mc) == null && McAccess.isInGame()) {
+            try {
+                Object mouseHelper = McAccess.getObject(mc, FIELD_MOUSE_HELPER);
+                if (mouseHelper != null) {
+                    mouseHelper.getClass().getMethod("grabMouseCursor").invoke(mouseHelper);
+                }
+            } catch (Throwable t) {
+                // ignore
+            }
+        }
+
+        // Raven FOV restore
+        boolean shouldRestoreFov = hold.getValue()
+                || getFovSetting() == lastFov
+                || customFov.getValue();
+        if (shouldRestoreFov) {
+            setFovSetting(lastFov);
+        }
+
+        // Restore player rotation to original facing direction
+        setPlayerYaw(originalYaw);
+        setPlayerPitch(originalPitch);
+    }
+
+    private void applyThirdPersonView(int view) {
+        if (view < 0) view = 0;
+        if (view > 2) view = 2;
+
+        setThirdPersonView(view);
+
+        Object mc = McAccess.getMinecraft();
+        if (mc != null) {
+            Object entityRenderer = McAccess.getObject(mc, "field_71460_t");
+            if (entityRenderer != null) {
+                if (view == 0) {
+                    Object rve = McAccess.renderViewEntity();
+                    if (rve != null) {
+                        McAccess.invoke(entityRenderer, METHOD_LOAD_ENTITY_SHADER,
+                                new Class<?>[] { rve.getClass() }, rve);
+                    }
+                } else if (view == 1) {
+                    McAccess.invoke(entityRenderer, METHOD_LOAD_ENTITY_SHADER,
+                            new Class<?>[] { Object.class }, new Object[] { null });
+                }
+            }
+
+            Object renderGlobal = McAccess.getObject(mc, FIELD_RENDER_GLOBAL);
+            if (renderGlobal != null) {
+                try {
+                    renderGlobal.getClass().getMethod("setDisplayListEntitiesDirty")
+                            .invoke(renderGlobal);
+                } catch (Throwable t) {
+                    McAccess.invoke(renderGlobal, "func_174982_b", new Class<?>[0]);
+                }
+            }
+        }
+    }
+
+    // ── Reflection helpers ────────────────────────────────────────────────
+
+    private float getPlayerYaw() {
+        Object player = McAccess.thePlayer();
+        if (player == null) return 0f;
+        return McAccess.getFloat(player, FIELD_ROTATION_YAW);
+    }
+
+    private float getPlayerPitch() {
+        Object player = McAccess.thePlayer();
+        if (player == null) return 0f;
+        return McAccess.getFloat(player, FIELD_ROTATION_PITCH);
+    }
+
+    private void setPlayerYaw(float yaw) {
+        Object player = McAccess.thePlayer();
+        if (player == null) return;
+        McAccess.setFloat(player, FIELD_ROTATION_YAW, yaw);
+    }
+
+    private void setPlayerPitch(float pitch) {
+        Object player = McAccess.thePlayer();
+        if (player == null) return;
+        McAccess.setFloat(player, FIELD_ROTATION_PITCH, pitch);
+    }
+
+    private int getThirdPersonView() {
+        Object settings = McAccess.gameSettings();
+        if (settings == null) return 0;
+        return McAccess.getInt(settings, FIELD_THIRD_PERSON_VIEW);
+    }
+
+    private void setThirdPersonView(int view) {
+        Object settings = McAccess.gameSettings();
+        if (settings == null) return;
+        McAccess.setInt(settings, FIELD_THIRD_PERSON_VIEW, view);
+    }
+
+    private float getFovSetting() {
+        Object settings = McAccess.gameSettings();
+        if (settings == null) return 90f;
+        return McAccess.getFloat(settings, FIELD_FOV_SETTING);
+    }
+
+    private void setFovSetting(float value) {
+        Object settings = McAccess.gameSettings();
+        if (settings == null) return;
+        McAccess.setFloat(settings, FIELD_FOV_SETTING, value);
+    }
+}
