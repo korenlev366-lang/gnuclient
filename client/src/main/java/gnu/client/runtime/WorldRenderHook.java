@@ -1,6 +1,5 @@
 package gnu.client.runtime;
 
-import gnu.client.module.modules.movement.TimerModule;
 import gnu.client.runtime.mc.ClientProfile;
 import gnu.client.runtime.mc.McAccess;
 
@@ -16,7 +15,6 @@ public final class WorldRenderHook {
     public static void onWorldRender(float partialTicks) {
         if (!McAccess.isResolved() || ClientProfile.current().usesForgeEvents())
             return;
-        TimerModule.maintain();
         if (!McAccess.isInGame())
             return;
         VanillaModuleDriver.renderPartial(partialTicks);

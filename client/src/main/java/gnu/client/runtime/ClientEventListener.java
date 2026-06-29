@@ -7,7 +7,6 @@ import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.combat.AutoBlockModule;
 import gnu.client.module.modules.network.BacktrackModule;
 import gnu.client.module.modules.network.LagrangeModule;
-import gnu.client.module.modules.movement.TimerModule;
 import gnu.client.runtime.mc.McAccess;
 import net.minecraftforge.fml.common.eventhandler.EventPriority;
 import net.minecraftforge.client.event.MouseEvent;
@@ -41,8 +40,7 @@ public final class ClientEventListener {
     public void onClientTick(TickEvent.ClientTickEvent event) {
         if (!McAccess.isResolved())
             return;
-        TimerModule.maintain();
-        if (event.phase == TickEvent.Phase.START) {
+                if (event.phase == TickEvent.Phase.START) {
             NativeBootstrap.handleRebindKeyboard();
             if (McAccess.currentScreen(McAccess.getMinecraft()) == null
                     && !NativeBootstrap.isRebindActive()) {

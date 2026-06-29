@@ -1,7 +1,6 @@
 package gnu.client.runtime;
 
 import gnu.client.module.modules.movement.StasisModule;
-import gnu.client.module.modules.movement.TimerModule;
 import gnu.client.runtime.mc.McAccess;
 
 /**
@@ -22,7 +21,7 @@ public final class PlayerUpdateHook {
             return false;
 
         StasisModule.onPreUpdate(player);
-        return TimerModule.shouldSkipLocalUpdate();
+        return false;
     }
 
 }

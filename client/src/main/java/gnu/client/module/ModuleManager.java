@@ -1,7 +1,6 @@
 package gnu.client.module;
 
 import gnu.client.common.GnuLog;
-import gnu.client.module.modules.movement.TimerModule;
 import gnu.client.module.modules.visual.NameTagsModule;
 
 import org.lwjgl.input.Keyboard;
@@ -17,6 +16,7 @@ public final class ModuleManager {
 
     private final Map<String, Module> modules = new LinkedHashMap<>();
     private final Map<Module, Long> lastToggleTime = new HashMap<>();
+    private final Map<Integer, Boolean> prevKeyState = new HashMap<>();
     private static final Object KEYBIND_LOCK = new Object();
     private static final long TOGGLE_DEBOUNCE_MS = 120L;
     private boolean initialized;
@@ -93,24 +93,24 @@ public final class ModuleManager {
         }
     }
 
-    /**
-     * Event-driven keybind toggles on the game thread (ClientTick PRE).
-     * Skipped while Timer is on — render thread owns keybinds then (avoids double-toggle).
-     */
-    public void handleKeybinds() {
-        if (TimerModule.isEnabledActive())
-            return;
-        synchronized (KEYBIND_LOCK) {
-            pollAndDispatchEvents();
-        }
-    }
+
+
+
+
+
+
+
+
+
+
+
 
     /**
-     * Poll LWJGL keyboard on the render thread while Timer is active (game tick may be frozen).
-     * Uses event-driven dispatch for responsiveness — quick key presses between ticks are
-     * captured via Keyboard.next() events rather than polling instantaneous state.
+     * Poll LWJGL keyboard on the game thread.
+     * Uses state-based dispatch ({@link Keyboard#isKeyDown}) with edge detection
+     * so LWJGL event queue is NOT consumed — vanilla input still works normally.
      */
-    public void pollKeyboardAndHandleKeybinds() {
+    public void handleKeybinds() {
         synchronized (KEYBIND_LOCK) {
             pollAndDispatchEvents();
         }
@@ -118,6 +118,9 @@ public final class ModuleManager {
 
     /**
      * Poll keyboard and dispatch any key-down events to bound modules.
+     * Uses state-based polling ({@link Keyboard#isKeyDown}) with edge detection
+     * so LWJGL event queue is NOT consumed — Minecraft still receives WASD,
+     * hotbar, inventory, and other vanilla key presses normally.
      * Debounce (120 ms) prevents key-repeat from double-toggling.
      */
     private void pollAndDispatchEvents() {
@@ -126,21 +129,20 @@ public final class ModuleManager {
         try {
             Keyboard.poll();
             long now = System.currentTimeMillis();
-            while (Keyboard.next()) {
-                if (!Keyboard.getEventKeyState())
-                    continue; // key release — ignore
-                int code = Keyboard.getEventKey();
-                if (code < 0 || code >= Keyboard.KEYBOARD_SIZE)
+            for (Module module : modules.values()) {
+                int code = module.getKeyCode();
+                if (code <= 0 || code >= Keyboard.KEYBOARD_SIZE)
                     continue;
-                for (Module module : modules.values()) {
-                    if (module.getKeyCode() == code) {
-                        Long last = lastToggleTime.get(module);
-                        if (last == null || now - last > TOGGLE_DEBOUNCE_MS) {
-                            module.toggle();
-                            lastToggleTime.put(module, now);
-                        }
+                boolean down = Keyboard.isKeyDown(code);
+                boolean prev = prevKeyState.getOrDefault(code, false);
+                if (down && !prev) {
+                    Long last = lastToggleTime.get(module);
+                    if (last == null || now - last > TOGGLE_DEBOUNCE_MS) {
+                        module.toggle();
+                        lastToggleTime.put(module, now);
                     }
                 }
+                prevKeyState.put(code, down);
             }
         } catch (Throwable ignored) {
         }

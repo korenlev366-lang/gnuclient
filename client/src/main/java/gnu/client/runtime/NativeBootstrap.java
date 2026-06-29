@@ -18,7 +18,6 @@ import gnu.client.module.modules.player.BridgeAssistModule;
 import gnu.client.module.modules.movement.FastStopModule;
 import gnu.client.module.modules.movement.SprintModule;
 import gnu.client.module.modules.movement.StasisModule;
-import gnu.client.module.modules.movement.TimerModule;
 import gnu.client.module.modules.player.FastPlaceModule;
 
 import gnu.client.module.modules.visual.BedEspModule;
@@ -137,11 +136,7 @@ public final class NativeBootstrap {
             } catch (Exception e) {
                 GnuLog.log("MODULE FAIL FastPlaceModule: " + e);
             }
-            try {
-                mgr.register(new TimerModule());
-            } catch (Exception e) {
-                GnuLog.log("MODULE FAIL TimerModule: " + e);
-            }
+
             try {
                 mgr.register(new StasisModule());
             } catch (Exception e) {
@@ -256,7 +251,6 @@ public final class NativeBootstrap {
 
             ConfigManager.INSTANCE.load();
             McAccess.resetTimer();
-            TimerModule.maintain();
 
             initialized = true;
             GnuLog.log("JAVA_READY profile=" + McAccess.profile().label() + " modules=" + GUI_MODULES.size());
@@ -294,7 +288,6 @@ public final class NativeBootstrap {
     public static void tick() {
         if (!initialized)
             return;
-        TimerModule.pollKeybindsIfNeeded();
         if (McAccess.profile().usesForgeEvents())
             return;
         VanillaModuleDriver.tick();

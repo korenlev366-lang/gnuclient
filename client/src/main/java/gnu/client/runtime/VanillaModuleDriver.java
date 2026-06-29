@@ -6,7 +6,6 @@ import gnu.client.module.modules.combat.ReachModule;
 import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.combat.AutoBlockModule;
 import gnu.client.module.modules.network.BacktrackModule;
-import gnu.client.module.modules.movement.TimerModule;
 import gnu.client.runtime.mc.McAccess;
 
 /**
@@ -26,8 +25,7 @@ public final class VanillaModuleDriver {
         if (!McAccess.isResolved())
             return;
 
-        TimerModule.maintain();
-        NativeBootstrap.handleRebindKeyboard();
+                NativeBootstrap.handleRebindKeyboard();
         Object mc = McAccess.getMinecraft();
         if (McAccess.currentScreen(mc) != null || NativeBootstrap.isRebindActive())
             return;
