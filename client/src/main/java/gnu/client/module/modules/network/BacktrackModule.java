@@ -59,7 +59,6 @@ public final class BacktrackModule extends Module implements PacketListener {
     private final SliderSetting outlineColorB = addSetting(new SliderSetting("OutlineColorB", 255.0f, 0.0f, 255.0f));
     private final SliderSetting lineWidth = addSetting(new SliderSetting("Line width", 1.5f, 1.0f, 4.0f));
     private final SliderSetting outlineWidth = addSetting(new SliderSetting("Outline width", 1.5f, 1.0f, 4.0f));
-    private final SliderSetting lerpOffset = addSetting(new SliderSetting("LerpOffset", 0.0f, 0.0f, 100.0f));
     private final BoolSetting enableTrail = addSetting(new BoolSetting("EnableTrail", true));
     private final SliderSetting trailDuration = addSetting(new SliderSetting("Trail duration", 500.0f, 100.0f, 2000.0f));
     private final SliderSetting maxTrailPoints = addSetting(new SliderSetting("MaxTrailPoints", 20.0f, 5.0f, 50.0f));
@@ -84,6 +83,8 @@ public final class BacktrackModule extends Module implements PacketListener {
     private static final int MAX_INBOUND_RELEASE_PER_TICK = 2;
     private static final int MAX_QUEUE_DEPTH = 16;
     private static final long TRACKING_BUFFER_MS = 500L;
+    private static final long GHOST_INTERP_MS = 80L;
+    private static final double POS_EPS = 1.0e-6;
     private final ConcurrentLinkedQueue<QueuedInbound> inboundQueue = new ConcurrentLinkedQueue<>();
     private final BacktrackTargetPosition position = new BacktrackTargetPosition();
     private final Deque<TrailPoint> serverTrail = new ArrayDeque<>();
@@ -99,6 +100,15 @@ public final class BacktrackModule extends Module implements PacketListener {
     private float rolledChance;
     private int targetHitCount;
     private int comboCount;
+
+    private double ghostFromX;
+    private double ghostFromY;
+    private double ghostFromZ;
+    private double ghostToX;
+    private double ghostToY;
+    private double ghostToZ;
+    private long ghostInterpStartMs;
+    private boolean ghostInterpValid;
 
     public BacktrackModule() {
         super("Back Track", "Hit players at their past position", Category.COMBAT);
@@ -284,7 +294,7 @@ public final class BacktrackModule extends Module implements PacketListener {
         if (!position.isValid())
             return;
 
-        double[] ghost = renderGhostPosition(partialTicks);
+        double[] ghost = renderGhostPosition();
         double sx = ghost[0];
         double sy = ghost[1];
         double sz = ghost[2];
@@ -376,28 +386,55 @@ public final class BacktrackModule extends Module implements PacketListener {
             serverTrail.pollFirst();
     }
 
-    private double[] renderGhostPosition(float partialTicks) {
-        double gx = position.x();
-        double gy = position.y();
-        double gz = position.z();
-        float lerp = lerpOffset.getValue() / 100.0f;
-        if (lerp > 0.001f && target != null) {
-            double ex = McAccess.entityPosX(target);
-            double ey = McAccess.entityPosY(target);
-            double ez = McAccess.entityPosZ(target);
-            Object lastX = McAccess.getObject(target, "field_70142_S");
-            Object lastY = McAccess.getObject(target, "field_70137_T");
-            Object lastZ = McAccess.getObject(target, "field_70136_U");
-            if (lastX instanceof Double && lastY instanceof Double && lastZ instanceof Double) {
-                ex = (Double) lastX + (ex - (Double) lastX) * partialTicks;
-                ey = (Double) lastY + (ey - (Double) lastY) * partialTicks;
-                ez = (Double) lastZ + (ez - (Double) lastZ) * partialTicks;
-            }
-            gx = ex + (gx - ex) * lerp;
-            gy = ey + (gy - ey) * lerp;
-            gz = ez + (gz - ez) * lerp;
+    private double[] renderGhostPosition() {
+        double sx = position.x();
+        double sy = position.y();
+        double sz = position.z();
+
+        long nowMs = System.currentTimeMillis();
+        if (!ghostInterpValid) {
+            ghostFromX = sx;
+            ghostFromY = sy;
+            ghostFromZ = sz;
+            ghostToX = sx;
+            ghostToY = sy;
+            ghostToZ = sz;
+            ghostInterpStartMs = nowMs;
+            ghostInterpValid = true;
+        } else if (posChanged(sx, sy, sz, ghostToX, ghostToY, ghostToZ)) {
+            double te = Math.min(1.0, (nowMs - ghostInterpStartMs) / (double) GHOST_INTERP_MS);
+            ghostFromX = lerp(ghostFromX, ghostToX, te);
+            ghostFromY = lerp(ghostFromY, ghostToY, te);
+            ghostFromZ = lerp(ghostFromZ, ghostToZ, te);
+            ghostToX = sx;
+            ghostToY = sy;
+            ghostToZ = sz;
+            ghostInterpStartMs = nowMs;
         }
-        return new double[] { gx, gy, gz };
+
+        double t = Math.min(1.0, (nowMs - ghostInterpStartMs) / (double) GHOST_INTERP_MS);
+        return new double[] {
+                lerp(ghostFromX, ghostToX, t),
+                lerp(ghostFromY, ghostToY, t),
+                lerp(ghostFromZ, ghostToZ, t)
+        };
+    }
+
+    private void clearGhostInterp() {
+        ghostInterpValid = false;
+    }
+
+    private static boolean posChanged(double ax, double ay, double az,
+            double bx, double by, double bz) {
+        return Math.abs(ax - bx) > POS_EPS || Math.abs(ay - by) > POS_EPS || Math.abs(az - bz) > POS_EPS;
+    }
+
+    private static double lerp(double from, double to, double t) {
+        if (t <= 0.0)
+            return from;
+        if (t >= 1.0)
+            return to;
+        return from + (to - from) * t;
     }
 
     private float pulseAlpha() {
@@ -582,6 +619,7 @@ public final class BacktrackModule extends Module implements PacketListener {
         targetEntityId = -1;
         position.reset();
         serverTrail.clear();
+        clearGhostInterp();
         shouldPauseTarget = false;
         if (!hasQueuedIncoming())
             InboundLagCoordinator.release(InboundLagCoordinator.Owner.BACKTRACK);
