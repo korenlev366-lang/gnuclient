@@ -183,7 +183,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         currentTarget = findTarget(player, world);
 
         // ── Input state ───────────────────────────────────────────────────
-        // Raven-bS: both KillAura and AutoClicker count as LMB held
+        // AutoClicker counts as LMB held when enabled (physical LMB also counts).
         boolean clickSourceActive = isClickSourceActive();
         boolean rmbDown = McAccess.isPhysicalRmbDown();
         boolean lmbDown = McAccess.isPhysicalLmbDown() || clickSourceActive;
@@ -239,18 +239,8 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
 
         // ── Start blocking ────────────────────────────────────────────────
         // Start blocking when conditions are met and not already blocking/lagging.
-        if (!isBlocking && !isLagging) {
-            boolean shouldStart;
-            if (onlyWhenDamaged.getValue()) {
-                shouldStart = shouldPredictiveBlock();
-            } else {
-                // Proactive block: ensure C08 is sent before any C02 in this tick,
-                // preventing Grim PacketOrderB (pre-attack) flags.
-                shouldStart = true;
-            }
-            if (shouldStart) {
-                startBlocking(currentTick);
-            }
+        if (!isBlocking && !isLagging && canStartBlock()) {
+            startBlocking(currentTick);
         }
 
         // ── [DIAG] Gate-state snapshot ──────────────────────────────────────
@@ -370,7 +360,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
                 // The game's blockHitTimer (set to 5 by attackEntity())
                 // prevents C08 from being sent in the same tick as C02,
                 // so the reblock is naturally deferred by the game itself.
-                if (blockAgainImmediately.getValue() && isHoldingSword() && McAccess.currentScreen() == null) {
+                if (blockAgainImmediately.getValue() && canStartBlock()) {
                     startBlocking(tickCounter);
                 }
 
@@ -454,8 +444,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
             // behavior).  startBlocking() now sends C08 synchronously via
             // sendUseItem(), so the server sees the block start before the
             // attack arrives — preventing PacketOrderB (pre-attack).
-            if (blockAgainImmediately.getValue() && isHoldingSword()
-                    && McAccess.currentScreen() == null) {
+            if (blockAgainImmediately.getValue() && canStartBlock()) {
                 startBlocking(tickCounter);
             }
 
@@ -542,6 +531,33 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     }
 
     // ── Condition checks ──────────────────────────────────────────────────
+
+    /**
+     * True iff auto-block (targeted LMB combat block) is allowed right now.
+     * Recomputes target + input — safe to call from onSend mid-tick.
+     */
+    private boolean canStartBlock() {
+        Object player = McAccess.thePlayer();
+        Object world = McAccess.theWorld();
+        if (player == null || world == null || McAccess.currentScreen() != null)
+            return false;
+        if (!isHoldingSword())
+            return false;
+        if (findTarget(player, world) == null)
+            return false;
+        boolean clickSourceActive = isClickSourceActive();
+        boolean rmbDown = McAccess.isPhysicalRmbDown();
+        boolean lmbDown = McAccess.isPhysicalLmbDown() || clickSourceActive;
+        if (requireRmb.getValue() && !rmbDown)
+            return false;
+        if (!lmbDown)
+            return false;
+        if (!checkConditions(lmbDown, rmbDown))
+            return false;
+        if (onlyWhenDamaged.getValue() && !shouldPredictiveBlock())
+            return false;
+        return true;
+    }
 
     private boolean checkConditions(boolean lmbDown, boolean rmbDown) {
         if (requireLmb.getValue() && !lmbDown) return false;
