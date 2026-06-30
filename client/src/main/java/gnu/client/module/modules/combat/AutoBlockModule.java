@@ -110,6 +110,10 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     private final Consumer<Object> releaseHeldPacket = packet -> {
         if (PacketHelper.isSendUseItem(packet))
             GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " C08-lagdrain");
+        if (PacketHelper.isAttackUseEntity(packet)) {
+            GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " C0A-synth-drain");
+            PacketUtil.sendSwingAnimation();
+        }
         PacketUtil.sendPacketReleased(packet);
     };
     private boolean isLagging;
@@ -341,6 +345,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
                 // ── OFF (default): raven-bS — releaseLag() drains buffered
                 // natural C07 (from stopBlocking at hold-expiry) in FIFO before
                 // this C02 reaches the server. No synthetic C07.
+                boolean wasLagging = true;
                 releaseLag();
 
                 // Reblock immediately if blockAgainImmediately is on.
@@ -350,7 +355,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
                     startBlocking(tickCounter);
                 }
 
-                // Let C02 pass through unmodified
+                sendSyntheticSwingBeforeAttack(wasLagging);
                 return false;
             }
 
@@ -434,10 +439,19 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
                 startBlocking(tickCounter);
             }
 
+            sendSyntheticSwingBeforeAttack(false);
             return false;
         }
 
         return false;
+    }
+
+    /** Grim PacketOrderB: inject C0A after lag drain, immediately before C02. */
+    private void sendSyntheticSwingBeforeAttack(boolean wasLagging) {
+        if (!isActive() && !wasLagging)
+            return;
+        GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " C0A-synth");
+        PacketUtil.sendSwingAnimation();
     }
 
     @Override
