@@ -99,6 +99,8 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     private boolean isBlocking;
     private boolean manualBlock;
     private int blockStartTick = -1;
+    /** Dedupes startBlocking across onTickStart + onSend in the same module tick. */
+    private int blockStartedModuleTick = -1;
     private int lastSelfHurtTime;
     // Current target (nearest valid player in range)
     private Object currentTarget;
@@ -330,43 +332,20 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
             if (PacketHelper.isAttackUseEntity(packet)) {
                 if (holdThroughLag.getValue()) {
                     // Hold Through Lag: buffer C02 instead of force-flushing.
-                    // Still send synthetic C07 RELEASE_USE_ITEM immediately to
-                    // clear server-side isUsingItem (preventing MultiActionsA).
-                    // The attack stays queued with other held packets and will
-                    // release on the normal duration-expiry flush (drainAll).
-                    // isLagging stays true; lag continues to expiry as usual.
-                    GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " C07-release");
-                    McAccess.sendReleaseUseItem(McAccess.thePlayer());
+                    // Natural C07 from stopBlocking stays buffered until lag
+                    // expiry drainAll — no synthetic release on attack.
                     outbound.offer(packet);
                     return true;   // cancel send — C02 is now buffered
                 }
 
-                // ── OFF (default): current raven-bS behavior unchanged ──
-                // Bit 1: Send synthetic C07 RELEASE_USE_ITEM to clear the
-                // server's isUsingItem.  This prevents Grim MultiActionsA
-                // (attack_while_using) which would otherwise fire because
-                // the server still has isUsingItem=true from the pre-lag C08.
-                GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " C07-release");
-                McAccess.sendReleaseUseItem(McAccess.thePlayer());
-
-                // Bit 2: Release the lag window — deactivates the outbound
-                // queue and drains all buffered packets (including the natural
-                // C07 from stopUsingItem, C03 movements, etc.) in FIFO order.
-                // The drain sends packets via PacketUtil.sendPacketReleased,
-                // which bypasses our PacketEvents listeners via SEND_FAST_TRACK.
-                // These drained packets reach the server BEFORE the C02 below:
-                //   C07 (natural, buffered) → C03 → ... → C07 (synthetic) → C02
-                // Only the first C07 matters — it clears isUsingItem. The
-                // synthetic C07 above is a no-op on the server (isUsingItem
-                // already false from the natural one).
+                // ── OFF (default): raven-bS — releaseLag() drains buffered
+                // natural C07 (from stopBlocking at hold-expiry) in FIFO before
+                // this C02 reaches the server. No synthetic C07.
                 releaseLag();
 
-                // Bit 3: Reblock immediately if blockAgainImmediately is on.
-                // This matches raven-bS onSendPacket behavior:
-                //   releaseLag() + startBlocking(tickCounter)
-                // The game's blockHitTimer (set to 5 by attackEntity())
-                // prevents C08 from being sent in the same tick as C02,
-                // so the reblock is naturally deferred by the game itself.
+                // Reblock immediately if blockAgainImmediately is on.
+                // Matches raven-bS: releaseLag() + startBlocking(tickCounter).
+                // blockHitTimer (set to 5 by attackEntity()) defers C08 same tick.
                 if (blockAgainImmediately.getValue() && canStartBlock()) {
                     startBlocking(tickCounter);
                 }
@@ -590,6 +569,8 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
 
     private void startBlocking(int currentTick) {
         if (!isHoldingSword()) return;
+        if (blockStartedModuleTick == currentTick) return;
+        blockStartedModuleTick = currentTick;
         GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " BLOCKSTART");
         // Raven-bS: skip clearItemInUse — clearing the player's activeItemStack
         // creates a window where isUsingItem()=false despite the module tracking
