@@ -7,6 +7,7 @@ import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.McAccess;
 import gnu.client.runtime.packet.OutboundLagQueue;
+import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketUtil;
 import gnu.client.common.GnuLog;
@@ -104,7 +105,11 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
 
     // Lag state (OutboundLagQueue-based: buffers non-attack packets during lag window).
     private final OutboundLagQueue outbound = new OutboundLagQueue();
-    private final Consumer<Object> releaseHeldPacket = PacketUtil::sendPacketReleased;
+    private final Consumer<Object> releaseHeldPacket = packet -> {
+        if (PacketHelper.isSendUseItem(packet))
+            GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " C08-lagdrain");
+        PacketUtil.sendPacketReleased(packet);
+    };
     private boolean isLagging;
     private int lagStartTick = -1;
     // Tick counter (monotonic, wraps safely)
@@ -330,6 +335,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
                     // The attack stays queued with other held packets and will
                     // release on the normal duration-expiry flush (drainAll).
                     // isLagging stays true; lag continues to expiry as usual.
+                    GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " C07-release");
                     McAccess.sendReleaseUseItem(McAccess.thePlayer());
                     outbound.offer(packet);
                     return true;   // cancel send — C02 is now buffered
@@ -340,6 +346,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
                 // server's isUsingItem.  This prevents Grim MultiActionsA
                 // (attack_while_using) which would otherwise fire because
                 // the server still has isUsingItem=true from the pre-lag C08.
+                GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " C07-release");
                 McAccess.sendReleaseUseItem(McAccess.thePlayer());
 
                 // Bit 2: Release the lag window — deactivates the outbound
@@ -583,23 +590,17 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
 
     private void startBlocking(int currentTick) {
         if (!isHoldingSword()) return;
+        GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " BLOCKSTART");
         // Raven-bS: skip clearItemInUse — clearing the player's activeItemStack
         // creates a window where isUsingItem()=false despite the module tracking
         // isBlocking=true. The game re-establishes state later in the tick via
         // rightClickMouse(), but that's fragile. clearBlockHitTimer zeros the
         // 5-tick blockHitDelay so sendUseItem won't silently drop C08 after attack.
         McAccess.clearBlockHitTimer();
-        // Clear client-side item-in-use state so sendUseItem() sends C08
-        // instead of toggling to C07. Without this, C08 is never sent
-        // (pressUseItemKeyOnce only increments KeyBinding.pressTime; it does
-        // NOT call rightClickMouse → sendUseItem).  The resulting C02-before-C08
-        // ordering causes Grim PacketOrderB (pre-attack).
-        McAccess.clearItemInUse(McAccess.thePlayer());
+        // Raven-bS keybind-only: setKeyBindState + onTick → rightClickMouse()
+        // later this tick sends exactly one C08. No explicit sendUseItem().
         McAccess.setUseItemKeyState(true);
         McAccess.pressUseItemKeyOnce();
-        // Immediately send C08 so it reaches the server before any C02
-        // attack sent later in this same tick.
-        McAccess.sendUseItem();
         isBlocking = true;
         blockStartTick = currentTick;
     }
@@ -622,6 +623,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
 
     private void startLag(int currentTick) {
         if (isLagging) return;
+        GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " LAGSTART");
         outbound.activate();
         isLagging = true;
         lagStartTick = currentTick;
