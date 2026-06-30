@@ -16,15 +16,22 @@ public final class PacketEvents {
     private PacketEvents() {}
 
     public static void register(PacketListener listener) {
-        if (listener != null && !LISTENERS.contains(listener))
-            LISTENERS.add(listener);
+        if (listener == null || LISTENERS.contains(listener))
+            return;
+        int priority = listener.sendPriority();
+        int index = 0;
+        for (; index < LISTENERS.size(); index++) {
+            if (LISTENERS.get(index).sendPriority() < priority)
+                break;
+        }
+        LISTENERS.add(index, listener);
     }
 
     public static void unregister(PacketListener listener) {
         LISTENERS.remove(listener);
     }
 
-    /** Injected at start of NetworkManager.sendPacket. Forward order — last registered runs last (Raven LOWEST). */
+    /** Injected at start of NetworkManager.sendPacket. Forward order by {@link PacketListener#sendPriority()}. */
     public static boolean onSend(Object packet) {
         if (PacketUtil.consumeFastTrack(packet))
             return false;

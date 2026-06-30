@@ -326,6 +326,11 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     // ── PacketListener ──────────────────────────────────────────────────
 
     @Override
+    public int sendPriority() {
+        return 100;
+    }
+
+    @Override
     public boolean onSend(Object packet) {
         if (packet == null || PacketUtil.isDispatching()) return false;
         if (!preventDelayAttacks.getValue()) return false;
@@ -461,6 +466,11 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         // Raven does NOT reset blocking state on teleport -- the module
         // re-evaluates conditions naturally on the next tick.
         if (PacketHelper.isPlayerPosLook(packet)) {
+            releaseLag();
+            return false;
+        }
+
+        if (PacketHelper.isSelfEntityVelocity(packet)) {
             releaseLag();
             return false;
         }

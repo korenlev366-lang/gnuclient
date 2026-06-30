@@ -266,6 +266,11 @@ public final class FreeLookModule extends Module implements PacketListener {
     // (e.g. aim assist) — the packet will carry the latest real direction.
 
     @Override
+    public int sendPriority() {
+        return 200;
+    }
+
+    @Override
     public boolean onSend(Object packet) {
         if (perspectiveToggled && PacketHelper.isPlayerMovement(packet)) {
             Object player = McAccess.thePlayer();
