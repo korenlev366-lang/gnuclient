@@ -629,6 +629,7 @@ void input_thread_main() {
     std::vector<libevdev*> devs;
     std::vector<int> fds;
     std::vector<bool> selected_mouse;
+    std::vector<std::string> paths;
     const std::string mouse_path = find_mouse_device();
 
     DIR* dir = opendir("/dev/input");
@@ -656,6 +657,7 @@ void input_thread_main() {
             devs.push_back(dev);
             fds.push_back(fd);
             selected_mouse.push_back(!mouse_path.empty() && path == mouse_path);
+            paths.push_back(path);
         }
         closedir(dir);
     }
@@ -675,6 +677,69 @@ void input_thread_main() {
         if (pr < 0)
             break;
         for (size_t i = 0; i < devs.size(); ++i) {
+            if (selected_mouse[i] &&
+                (pfds[i].revents & (POLLHUP | POLLERR | POLLNVAL))) {
+                log_line("GUI_ mouse: fd dead (revents=" +
+                         std::to_string(pfds[i].revents) + "), reconnecting");
+
+                libevdev_free(devs[i]);
+                close(fds[i]);
+                devs[i] = nullptr;
+                fds[i] = -1;
+                selected_mouse[i] = false;
+                paths[i].clear();
+                pfds[i].fd = -1;
+                pfds[i].revents = 0;
+
+                {
+                    std::lock_guard<std::mutex> g(g_input_mtx);
+                    g_left_down = false;
+                    g_right_down = false;
+                }
+
+                const std::string new_path = find_mouse_device();
+                if (new_path.empty())
+                    continue;
+
+                bool already_open = false;
+                for (size_t j = 0; j < paths.size(); ++j) {
+                    if (j == i || paths[j].empty())
+                        continue;
+                    if (paths[j] == new_path) {
+                        selected_mouse[j] = true;
+                        log_line("GUI_ mouse: reconnected at existing slot " +
+                                 std::to_string(j) + " " + new_path);
+                        already_open = true;
+                        break;
+                    }
+                }
+                if (already_open)
+                    continue;
+
+                int new_fd = open(new_path.c_str(), O_RDONLY | O_NONBLOCK);
+                if (new_fd < 0) {
+                    log_line("GUI_ mouse: reopen failed errno=" + std::to_string(errno));
+                    continue;
+                }
+                libevdev* new_dev = nullptr;
+                if (libevdev_new_from_fd(new_fd, &new_dev) < 0) {
+                    close(new_fd);
+                    log_line("GUI_ mouse: libevdev_new_from_fd failed errno=" +
+                             std::to_string(errno));
+                    continue;
+                }
+
+                devs[i] = new_dev;
+                fds[i] = new_fd;
+                selected_mouse[i] = true;
+                paths[i] = new_path;
+                pfds[i].fd = new_fd;
+                pfds[i].events = POLLIN;
+                pfds[i].revents = 0;
+                log_line("GUI_ mouse: reconnected " + new_path);
+                continue;
+            }
+
             if (!(pfds[i].revents & POLLIN))
                 continue;
             input_event ev;
