@@ -552,7 +552,7 @@ struct MouseCandidate {
     int score = 0;
 };
 
-std::string find_mouse_device() {
+std::string find_mouse_device(const std::string* prefer_name = nullptr) {
     log_line("GUI_ mouse: scanning /dev/input for physical mouse");
     std::vector<MouseCandidate> candidates;
 
@@ -606,7 +606,8 @@ std::string find_mouse_device() {
         libevdev_free(dev);
         close(fd);
 
-        if (passes_basic)
+        if (passes_basic &&
+            (!prefer_name || dev_name == *prefer_name))
             candidates.push_back(MouseCandidate{path, dev_name, score});
     }
 
@@ -682,6 +683,11 @@ void input_thread_main() {
                 log_line("GUI_ mouse: fd dead (revents=" +
                          std::to_string(pfds[i].revents) + "), reconnecting");
 
+                const std::string old_path = paths[i];
+                std::string old_name;
+                if (const char* nm = libevdev_get_name(devs[i]))
+                    old_name = nm;
+
                 libevdev_free(devs[i]);
                 close(fds[i]);
                 devs[i] = nullptr;
@@ -697,7 +703,42 @@ void input_thread_main() {
                     g_right_down = false;
                 }
 
-                const std::string new_path = find_mouse_device();
+                std::string new_path;
+                constexpr int kReconnectAttempts = 5;
+                constexpr useconds_t kReconnectDelayUs = 180000; // ~180ms
+                if (!old_name.empty()) {
+                    for (int attempt = 1; attempt <= kReconnectAttempts; ++attempt) {
+                        new_path = find_mouse_device(&old_name);
+                        if (!new_path.empty()) {
+                            log_line("GUI_ mouse: \"" + old_name + "\" reappeared at " +
+                                     new_path + " (was " + old_path + ", attempt " +
+                                     std::to_string(attempt) + ")");
+                            break;
+                        }
+                        if (attempt < kReconnectAttempts)
+                            usleep(kReconnectDelayUs);
+                    }
+                }
+                if (new_path.empty()) {
+                    new_path = find_mouse_device();
+                    if (!new_path.empty() && !old_name.empty()) {
+                        int probe_fd = open(new_path.c_str(), O_RDONLY | O_NONBLOCK);
+                        std::string fallback_name = "(unknown)";
+                        if (probe_fd >= 0) {
+                            libevdev* probe_dev = nullptr;
+                            if (libevdev_new_from_fd(probe_fd, &probe_dev) >= 0) {
+                                if (const char* nm = libevdev_get_name(probe_dev))
+                                    fallback_name = nm;
+                                libevdev_free(probe_dev);
+                            }
+                            close(probe_fd);
+                        }
+                        log_line("GUI_ mouse: original device \"" + old_name +
+                                 "\" not found after ~" +
+                                 std::to_string((kReconnectAttempts * kReconnectDelayUs) / 1000000) +
+                                 "s, falling back to " + new_path + " (\"" + fallback_name + "\")");
+                    }
+                }
                 if (new_path.empty())
                     continue;
 
