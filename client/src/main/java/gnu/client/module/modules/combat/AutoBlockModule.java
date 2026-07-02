@@ -10,7 +10,6 @@ import gnu.client.runtime.packet.OutboundLagQueue;
 import gnu.client.runtime.packet.PacketEvents;
 import gnu.client.runtime.packet.PacketHelper;
 import gnu.client.runtime.packet.PacketUtil;
-import gnu.client.common.GnuLog;
 import java.util.function.Consumer;
 
 /**
@@ -108,12 +107,8 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     // Lag state (OutboundLagQueue-based: buffers non-attack packets during lag window).
     private final OutboundLagQueue outbound = new OutboundLagQueue();
     private final Consumer<Object> releaseHeldPacket = packet -> {
-        if (PacketHelper.isSendUseItem(packet))
-            GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " C08-lagdrain");
-        if (PacketHelper.isAttackUseEntity(packet)) {
-            GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " C0A-synth-drain");
+        if (PacketHelper.isAttackUseEntity(packet))
             PacketUtil.sendSwingAnimation();
-        }
         PacketUtil.sendPacketReleased(packet);
     };
     private boolean isLagging;
@@ -168,13 +163,11 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         int currentTick = tickCounter;
         // Snapshot previous-tick value before resetting for this tick.
         attackedLastTick = attackedThisTick;
-        GnuLog.log("[AB] ENTER tick=" + currentTick);
         attackedThisTick = false;
 
         Object player = McAccess.thePlayer();
         Object world = McAccess.theWorld();
         if (player == null || world == null || McAccess.currentScreen() != null) {
-            GnuLog.log("[AB] BAIL pwS player=" + (player!=null) + " world=" + (world!=null) + " screen=" + (McAccess.currentScreen()!=null));
             resetState(true);
             return;
         }
@@ -184,7 +177,6 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         lastSelfHurtTime = selfHurtTime;
 
         if (!isHoldingSword()) {
-            GnuLog.log("[AB] BAIL noSword");
             resetState(false);
             return;
         }
@@ -243,7 +235,6 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         }
 
         if (!conditionsMet) {
-            GnuLog.log("[AB] BAIL condFalse hasTarget=" + (currentTarget!=null) + " click=" + isClickSourceActive());
             stopBlocking(true);
             return;
         }
@@ -253,19 +244,6 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         if (!isBlocking && !isLagging && canStartBlock()) {
             startBlocking(currentTick);
         }
-
-        // ── [DIAG] Gate-state snapshot ──────────────────────────────────────
-        GnuLog.log("[AB] tick=" + currentTick
-                + " isBlocking=" + isBlocking
-                + " isLagging=" + isLagging
-                + " blockStartTick=" + blockStartTick
-                + " lagStartTick=" + lagStartTick
-                + " conditionsMet=" + conditionsMet
-                + " hasTarget=" + (currentTarget != null)
-                + " clickSrc=" + isClickSourceActive()
-                + " shouldStartLagGate=" + (isBlocking && !isLagging)
-                + " atk=" + attackedLastTick
-                + " atkAge=" + (tickCounter - lastAttackTick));
 
         // ── Hold-time expiry -> lag (Raven-bS order: startLag THEN stopBlocking)
         if (isBlocking) {
@@ -278,18 +256,7 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
             }
             if (shouldStop) {
                 /* Step 1 (Raven-bS order): start lag first — the blink */
-                boolean lagGate = shouldStartLag();
-                GnuLog.log("[AB] holdExpiry entered=" + shouldStop
-                        + " willCallStartLag=" + lagGate
-                        + " tick=" + currentTick
-                        + " isBlocking=" + isBlocking
-                        + " isLagging=" + isLagging
-                        + " blockStartTick=" + blockStartTick
-                        + " lagStartTick=" + lagStartTick
-                        + " timeExpired=" + timeExpired
-                        + " hurtAgain=" + hurtAgain
-                        + " onlyWhenDamaged=" + onlyWhenDamaged.getValue());
-                if (lagGate) {
+                if (shouldStartLag()) {
                     startLag(currentTick);
                 }
                 /* Step 2: then stop blocking — key state released */
@@ -455,7 +422,6 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     private void sendSyntheticSwingBeforeAttack(boolean wasLagging) {
         if (!isActive() && !wasLagging)
             return;
-        GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " C0A-synth");
         PacketUtil.sendSwingAnimation();
     }
 
@@ -595,7 +561,6 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         if (!isHoldingSword()) return;
         if (blockStartedModuleTick == currentTick) return;
         blockStartedModuleTick = currentTick;
-        GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " BLOCKSTART");
         // Raven-bS: skip clearItemInUse — clearing the player's activeItemStack
         // creates a window where isUsingItem()=false despite the module tracking
         // isBlocking=true. The game re-establishes state later in the tick via
@@ -628,7 +593,6 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
 
     private void startLag(int currentTick) {
         if (isLagging) return;
-        GnuLog.log("[ORDER] tick=" + PacketEvents.worldTick() + " LAGSTART");
         outbound.activate();
         isLagging = true;
         lagStartTick = currentTick;
