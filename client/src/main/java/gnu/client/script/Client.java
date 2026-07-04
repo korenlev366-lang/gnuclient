@@ -73,6 +73,18 @@ public final class Client {
         return McAccess.isClientSprinting();
     }
 
+    public float getTimerSpeed() {
+        return McAccess.getTimerSpeed();
+    }
+
+    public void setTimerSpeed(float speed) {
+        McAccess.setTimerSpeed(speed);
+    }
+
+    public void resetTimer() {
+        McAccess.resetTimer();
+    }
+
     public void setRotation(float yaw, float pitch) {
         McAccess.setRotation(yaw, pitch);
     }

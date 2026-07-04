@@ -298,6 +298,7 @@ public final class ScriptManager {
         sb.append("import gnu.client.script.Keybinds;\n"); line++;
         sb.append("import gnu.client.script.Modules;\n"); line++;
         sb.append("import gnu.client.script.Packets;\n"); line++;
+        sb.append("import gnu.client.script.Status;\n"); line++;
         sb.append("import gnu.client.script.Util;\n"); line++;
         sb.append("import gnu.client.script.World;\n"); line++;
         sb.append("import java.util.ArrayList;\n"); line++;
@@ -315,6 +316,7 @@ public final class ScriptManager {
         sb.append("    public static final Keybinds keybinds = Keybinds.INSTANCE;\n"); line++;
         sb.append("    public static final Inventory inventory = Inventory.INSTANCE;\n"); line++;
         sb.append("    public static final Packets packets = Packets.INSTANCE;\n"); line++;
+        sb.append("    public static final Status status = Status.INSTANCE;\n"); line++;
         sb.append("    public static final Util util = Util.INSTANCE;\n"); line++;
         sb.append("\n"); line++;
         sb.append("    private final Modules modules;\n"); line++;

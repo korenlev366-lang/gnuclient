@@ -1373,6 +1373,140 @@ public final class McAccess {
         }
     }
 
+    public static boolean isUsingItem() {
+        return isUsingItem(thePlayer());
+    }
+
+    public static boolean isUsingItem(Object player) {
+        if (player == null)
+            return false;
+        return getObject(player, "field_71074_e") != null && getInt(player, "field_71072_f") > 0;
+    }
+
+    public static boolean isBlocking() {
+        return isBlocking(thePlayer());
+    }
+
+    public static boolean isBlocking(Object player) {
+        Object result = invoke(player, "func_70632_aY", new Class<?>[0]);
+        if (result == null)
+            result = invokeNamed(player, "isBlocking", new Class<?>[0]);
+        return result instanceof Boolean && (Boolean) result;
+    }
+
+    public static int getHurtTime() {
+        return getHurtTime(thePlayer());
+    }
+
+    public static int getHurtTime(Object entity) {
+        return getInt(entity, "field_70737_aN");
+    }
+
+    public static int getMaxHurtTime(Object entity) {
+        return getInt(entity, "field_70738_aO");
+    }
+
+    public static int getDeathTime(Object entity) {
+        return getInt(entity, "field_70725_aQ");
+    }
+
+    public static float getHealth() {
+        return getHealth(thePlayer());
+    }
+
+    public static float getHealth(Object entity) {
+        Object hp = invoke(entity, "func_110143_aJ", new Class<?>[0]);
+        if (hp == null)
+            hp = invokeNamed(entity, "getHealth", new Class<?>[0]);
+        return hp instanceof Float ? (Float) hp : 0.0f;
+    }
+
+    public static float getMaxHealth() {
+        return getMaxHealth(thePlayer());
+    }
+
+    public static float getMaxHealth(Object entity) {
+        Object hp = invoke(entity, "func_110138_aP", new Class<?>[0]);
+        if (hp == null)
+            hp = invokeNamed(entity, "getMaxHealth", new Class<?>[0]);
+        return hp instanceof Float ? (Float) hp : 0.0f;
+    }
+
+    public static float getAbsorption() {
+        return getAbsorption(thePlayer());
+    }
+
+    public static float getAbsorption(Object entity) {
+        Object absorption = invoke(entity, "func_110139_bj", new Class<?>[0]);
+        if (absorption == null)
+            absorption = invokeNamed(entity, "getAbsorptionAmount", new Class<?>[0]);
+        return absorption instanceof Float ? (Float) absorption : 0.0f;
+    }
+
+    public static boolean isDead() {
+        return isDead(thePlayer());
+    }
+
+    public static boolean isDead(Object entity) {
+        return getBool(entity, "field_70128_L");
+    }
+
+    public static boolean isAlive() {
+        return isAlive(thePlayer());
+    }
+
+    public static boolean isAlive(Object entity) {
+        return entity != null && !isDead(entity) && getDeathTime(entity) <= 0;
+    }
+
+    public static Object getHeldItemStack() {
+        return getHeldItemStack(thePlayer());
+    }
+
+    public static Object getHeldItemStack(Object player) {
+        Object stack = invoke(player, "func_70694_bm", new Class<?>[0]);
+        if (stack == null)
+            stack = invokeNamed(player, "getHeldItem", new Class<?>[0]);
+        return stack;
+    }
+
+    public static Object getHeldItem() {
+        return getHeldItem(thePlayer());
+    }
+
+    public static Object getHeldItem(Object player) {
+        Object stack = getHeldItemStack(player);
+        if (stack == null)
+            return null;
+        Object item = invoke(stack, "func_77973_b", new Class<?>[0]);
+        if (item == null)
+            item = invokeNamed(stack, "getItem", new Class<?>[0]);
+        return item;
+    }
+
+    public static boolean isHoldingSword() {
+        Object item = getHeldItem();
+        Class<?> sword = gameClass("net.minecraft.item.ItemSword");
+        return item != null && sword != null && sword.isInstance(item);
+    }
+
+    public static boolean isHoldingBlock() {
+        Object item = getHeldItem();
+        Class<?> itemBlock = gameClass("net.minecraft.item.ItemBlock");
+        return item != null && itemBlock != null && itemBlock.isInstance(item);
+    }
+
+    public static boolean isInWater() {
+        return isInWater(thePlayer());
+    }
+
+    public static boolean isInWater(Object entity) {
+        Object result = invoke(entity, "func_70090_H", new Class<?>[0]);
+        if (result == null)
+            result = invokeNamed(entity, "isInWater", new Class<?>[0]);
+        return result instanceof Boolean && (Boolean) result;
+    }
+
     /** Physical RMB (LWJGL button 1). */
     public static boolean isPhysicalRmbDown() {
         try {
@@ -1416,6 +1550,10 @@ public final class McAccess {
         if (tryGetBool(player, "field_82175_bq"))
             return true;
         return tryGetBool(player, "isSwingInProgress");
+    }
+
+    public static boolean isSwingInProgress() {
+        return isSwingInProgress(thePlayer());
     }
 
     private static boolean tryGetBool(Object owner, String fieldName) {
