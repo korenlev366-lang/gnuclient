@@ -33,6 +33,26 @@ public final class Keybinds {
         return false;
     }
 
+    public boolean isForwardDown() {
+        return McAccess.isForwardKeyHeld();
+    }
+
+    public boolean isBackDown() {
+        return McAccess.isBackKeyHeld();
+    }
+
+    public boolean isLeftDown() {
+        return McAccess.isLeftKeyHeld();
+    }
+
+    public boolean isRightDown() {
+        return McAccess.isRightKeyHeld();
+    }
+
+    public boolean isMovementDown() {
+        return McAccess.isMovementKeyHeld();
+    }
+
     /**
      * Synthesize a vanilla right-click (item-use / block-place) via
      * {@code PlayerControllerMP.sendUseItem}. Returns {@code true} if the

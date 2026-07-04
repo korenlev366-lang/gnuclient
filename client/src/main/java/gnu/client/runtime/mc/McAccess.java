@@ -1229,6 +1229,26 @@ public final class McAccess {
         return isKeyBindDown("field_74312_F");
     }
 
+    public static boolean isForwardKeyHeld() {
+        return isPhysicalKeyBindDown("field_74351_w");
+    }
+
+    public static boolean isBackKeyHeld() {
+        return isPhysicalKeyBindDown("field_74368_y");
+    }
+
+    public static boolean isLeftKeyHeld() {
+        return isPhysicalKeyBindDown("field_74370_x");
+    }
+
+    public static boolean isRightKeyHeld() {
+        return isPhysicalKeyBindDown("field_74366_z");
+    }
+
+    public static boolean isMovementKeyHeld() {
+        return isForwardKeyHeld() || isBackKeyHeld() || isLeftKeyHeld() || isRightKeyHeld();
+    }
+
     /**
      * Physical LMB from LWJGL/GLFW (Wayland-safe). Falls back to evdev only if LWJGL
      * is unavailable.
