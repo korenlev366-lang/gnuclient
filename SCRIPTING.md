@@ -42,7 +42,11 @@ the module itself is enabled.
 A script file is **not** a standalone compilable Java file — do not
 include `package`, `import`, or a `class` declaration. Just write bare
 field declarations and bare methods, as if writing the body of a class
-that already exists:
+that already exists.
+
+> **Do not use `import` statements.** The script compiler wraps your body
+> into a generated class that already imports `java.util.List` and
+> `java.util.ArrayList`. Extra imports cause compile errors.
 
 ```java
 // RenamedScript.java
@@ -97,7 +101,8 @@ All optional (a script with none of these is legal but does nothing).
 | Method | Signature | Called | Notes |
 |---|---|---|---|
 | `onLoad` | `void onLoad()` | Once, immediately after registration, **before** `ConfigManager.load()` runs | Register settings here via `modules.registerButton`/`registerSlider` |
-| `onPreUpdate` | `void onPreUpdate()` | Every client tick, only while the module is enabled | Main tick logic |
+| `onPreUpdate` | `void onPreUpdate()` | Once per tick at **ClientTick START** | Main tick logic |
+| `onPostUpdate` | `void onPostUpdate()` | Once per tick at **ClientTick END** (optional) | End-of-tick logic |
 | `onScriptDisable` | `void onScriptDisable()` | When the module is disabled | **Not** `onDisable` — that name collides with `Module`'s own override. Use `onScriptDisable`. |
 
 If any of these throws, the error is logged (`GnuLog`, visible in
@@ -197,6 +202,19 @@ boolean isSprinting()
 float  getTimerSpeed()
 void   setTimerSpeed(float speed)           // UNCLAMPED — any value is passed through
 void   resetTimer()                         // reset to vanilla (1.0)
+
+double getPosX() / getPosY() / getPosZ()  // local player position
+void   setJump(boolean jump)                // vanilla jump input
+
+boolean isRiding()
+Object  getRidingEntity()                   // Entity being ridden, or null
+void    setRidingMotion(double x, double y, double z)
+double  entityPosX/Y/Z(Object entity)
+void    setEntityPosition(Object entity, double x, double y, double z)
+void    setEntityVelocity(Object entity, double x, double y, double z)
+void    setEntityYaw(Object entity, float yaw)
+void    sendSteer(float strafe, float forward, boolean jump, boolean unmount)
+                                            // C0C steer — keep |strafe|, |forward| <= 0.98 (Grim VehicleA)
 ```
 
 > Note: `setRotation` does not affect FreeLook's camera path — FreeLook
@@ -371,3 +389,17 @@ reference first):
   under `LaunchClassLoader` (the jar is added via `addURL()` at runtime,
   so it's never on the system classpath property). See
   `ScriptManager.ourJarPath()`.
+
+## Grim AC testing (1.8.9)
+
+On-foot fly **will flag** Grim Simulation. The working exemption is **vehicle fly**
+while mounted in a boat or minecart.
+
+Scripts (copy from `GNUClient/scripts/examples/`, reload after jar update):
+
+| Script | Purpose |
+|--------|---------|
+| `grim_fly.java` | Boat/minecart fly — motion only, no extra C0C (VehicleTimer-safe) |
+| `grim_disabler.java` | Block S08 setback; optional S12 Y boost |
+
+Log results in `gnu client dev/Grim-bypass-log.md`. Requires a boat — on-foot does nothing.

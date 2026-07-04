@@ -169,6 +169,26 @@ public final class PacketHelper {
         return !(r instanceof Boolean) || (Boolean) r;
     }
 
+    /** SRG fields on {@code C03PacketPlayer} (MCP 1.8.9 stable_22). */
+    private static final String FIELD_C03_X = "field_149479_a";
+    private static final String FIELD_C03_Y = "field_149477_b";
+    private static final String FIELD_C03_Z = "field_149478_c";
+    private static final String FIELD_C03_ON_GROUND = "field_149474_g";
+
+    public static void c03SetPosition(Object packet, double x, double y, double z) {
+        if (!c03HasPosition(packet))
+            return;
+        McAccess.setDouble(packet, FIELD_C03_X, x);
+        McAccess.setDouble(packet, FIELD_C03_Y, y);
+        McAccess.setDouble(packet, FIELD_C03_Z, z);
+    }
+
+    public static void c03SetOnGround(Object packet, boolean onGround) {
+        if (!isPlayerMovement(packet))
+            return;
+        McAccess.setBool(packet, FIELD_C03_ON_GROUND, onGround);
+    }
+
     public static int entityId(Object packet) {
         Object id = McAccess.invoke(packet, "func_149026_a", new Class<?>[0]);
         if (id == null)
@@ -289,6 +309,16 @@ public final class PacketHelper {
 
     public static int velocityMotionZ(Object packet) {
         return readVelocityMotionComponent(packet, "field_149414_d", "func_149269_i");
+    }
+
+    public static void velocitySetMotionY(Object packet, int motionY) {
+        if (!isEntityVelocity(packet))
+            return;
+        McAccess.setInt(packet, "field_149416_c", motionY);
+    }
+
+    public static boolean isSteerVehicle(Object packet) {
+        return classNameContains(packet, "C0CPacketInput");
     }
 
     private static int readVelocityMotionComponent(Object packet, String fieldSrg, String getterSrg) {

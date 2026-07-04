@@ -84,6 +84,8 @@ public final class MappingTable {
         putField("field_70159_w", "v");   // motionX
         putField("field_70181_x", "w");   // motionY
         putField("field_70179_y", "x");   // motionZ
+        putMcpMember("field_70153_n", "riddenByEntity");
+        putMcpMember("field_70154_o", "ridingEntity");
         putField("field_71415_G", "A");   // inGameHasFocus
         // Legacy entityId / isSprinting / isSwingInProgress fields (not in stable_22 CSV;
         // preserved as fallbacks for older MCP-based Forge builds)
@@ -271,6 +273,8 @@ public final class MappingTable {
         putMethod("func_74507_a", "b");   // onTick (KeyBinding)
         putMethod("func_151470_d", "e");  // isKeyDown
         putMethod("func_78898_a", "a");   // updatePlayerMoveState
+        putMethod("func_70107_b", "b");   // setPosition
+        putMethod("func_70016_h", "g");   // setVelocity
     }
 
     private MappingTable() {}

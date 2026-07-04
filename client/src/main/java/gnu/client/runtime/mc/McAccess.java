@@ -1249,6 +1249,14 @@ public final class McAccess {
         return isForwardKeyHeld() || isBackKeyHeld() || isLeftKeyHeld() || isRightKeyHeld();
     }
 
+    public static boolean isJumpKeyHeld() {
+        return isPhysicalKeyBindDown("field_74314_A");
+    }
+
+    public static boolean isSneakKeyHeld() {
+        return isPhysicalKeyBindDown("field_74311_E");
+    }
+
     /**
      * Physical LMB from LWJGL/GLFW (Wayland-safe). Falls back to evdev only if LWJGL
      * is unavailable.
@@ -1814,6 +1822,79 @@ public final class McAccess {
         setDouble(player, "field_70159_w", x);
         setDouble(player, "field_70181_x", y);
         setDouble(player, "field_70179_y", z);
+    }
+
+    /** Entity the local player is riding, or null. SRG {@code field_70154_o}. */
+    public static Object getRidingEntity(Object entity) {
+        if (entity == null)
+            return null;
+        return getObject(entity, "field_70154_o");
+    }
+
+    public static boolean isRiding() {
+        return getRidingEntity(thePlayer()) != null;
+    }
+
+    public static void setEntityMotion(Object entity, double x, double y, double z) {
+        if (entity == null)
+            return;
+        setDouble(entity, "field_70159_w", x);
+        setDouble(entity, "field_70181_x", y);
+        setDouble(entity, "field_70179_y", z);
+    }
+
+    /** {@code C0CPacketInput} — boat/horse steer (1.8.9). */
+    public static void sendSteerVehicle(float strafe, float forward, boolean jump, boolean unmount) {
+        try {
+            Object packet = newInstance(
+                    "net.minecraft.network.play.client.C0CPacketInput",
+                    new Class<?>[] { float.class, float.class, boolean.class, boolean.class },
+                    strafe, forward, jump, unmount);
+            if (packet != null)
+                addToSendQueue(packet);
+        } catch (Throwable t) {
+            GnuLog.log("JAVA_ McAccess sendSteerVehicle error: " + t);
+        }
+    }
+
+    public static boolean isBoat(Object entity) {
+        if (entity == null)
+            return false;
+        Class<?> boat = gameClass("net.minecraft.entity.item.EntityBoat");
+        if (boat != null && boat.isInstance(entity))
+            return true;
+        return entity.getClass().getSimpleName().contains("Boat");
+    }
+
+    public static boolean isMinecart(Object entity) {
+        if (entity == null)
+            return false;
+        Class<?> cart = gameClass("net.minecraft.entity.item.EntityMinecart");
+        if (cart != null && cart.isInstance(entity))
+            return true;
+        String name = entity.getClass().getSimpleName();
+        return name.contains("Minecart");
+    }
+
+    public static void setEntityYaw(Object entity, float yaw) {
+        if (entity == null)
+            return;
+        setFloat(entity, "field_70177_z", yaw);
+        setFloat(entity, "field_70126_B", yaw);
+    }
+
+    /** {@code Entity.setPosition} — updates pos + bounding box. */
+    public static void setEntityPosition(Object entity, double x, double y, double z) {
+        if (entity == null)
+            return;
+        invoke(entity, "func_70107_b", new Class<?>[] { double.class, double.class, double.class }, x, y, z);
+    }
+
+    /** {@code Entity.setVelocity} — sets motion fields on entity. */
+    public static void setEntityVelocity(Object entity, double x, double y, double z) {
+        if (entity == null)
+            return;
+        invoke(entity, "func_70016_h", new Class<?>[] { double.class, double.class, double.class }, x, y, z);
     }
 
     /**

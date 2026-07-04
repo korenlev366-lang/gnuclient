@@ -92,4 +92,66 @@ public final class Client {
     public void setMotion(double x, double y, double z) {
         McAccess.setMotion(x, y, z);
     }
+
+    public double getPosX() {
+        Object player = getPlayer();
+        return player == null ? 0.0 : McAccess.entityPosX(player);
+    }
+
+    public double getPosY() {
+        Object player = getPlayer();
+        return player == null ? 0.0 : McAccess.entityPosY(player);
+    }
+
+    public double getPosZ() {
+        Object player = getPlayer();
+        return player == null ? 0.0 : McAccess.entityPosZ(player);
+    }
+
+    /** Drive vanilla jump input (MovementInput.jump + keyBindJump state). */
+    public void setJump(boolean jump) {
+        McAccess.setJumpInput(getPlayer(), jump);
+    }
+
+    public boolean isRiding() {
+        return McAccess.isRiding();
+    }
+
+    /** Riding entity ({@code Entity}) or null. */
+    public Object getRidingEntity() {
+        return McAccess.getRidingEntity(getPlayer());
+    }
+
+    public void setRidingMotion(double x, double y, double z) {
+        McAccess.setEntityMotion(getRidingEntity(), x, y, z);
+    }
+
+    public double entityPosX(Object entity) {
+        return entity == null ? 0.0 : McAccess.entityPosX(entity);
+    }
+
+    public double entityPosY(Object entity) {
+        return entity == null ? 0.0 : McAccess.entityPosY(entity);
+    }
+
+    public double entityPosZ(Object entity) {
+        return entity == null ? 0.0 : McAccess.entityPosZ(entity);
+    }
+
+    public void setEntityPosition(Object entity, double x, double y, double z) {
+        McAccess.setEntityPosition(entity, x, y, z);
+    }
+
+    public void setEntityVelocity(Object entity, double x, double y, double z) {
+        McAccess.setEntityVelocity(entity, x, y, z);
+    }
+
+    public void setEntityYaw(Object entity, float yaw) {
+        McAccess.setEntityYaw(entity, yaw);
+    }
+
+    /** Boat/horse input packet — keep forward/sideways under 0.98 for Grim VehicleA. */
+    public void sendSteer(float strafe, float forward, boolean jump, boolean unmount) {
+        McAccess.sendSteerVehicle(strafe, forward, jump, unmount);
+    }
 }

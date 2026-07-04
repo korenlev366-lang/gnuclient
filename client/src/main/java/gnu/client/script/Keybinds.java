@@ -53,6 +53,14 @@ public final class Keybinds {
         return McAccess.isMovementKeyHeld();
     }
 
+    public boolean isJumpDown() {
+        return McAccess.isJumpKeyHeld();
+    }
+
+    public boolean isSneakDown() {
+        return McAccess.isSneakKeyHeld();
+    }
+
     /**
      * Synthesize a vanilla right-click (item-use / block-place) via
      * {@code PlayerControllerMP.sendUseItem}. Returns {@code true} if the

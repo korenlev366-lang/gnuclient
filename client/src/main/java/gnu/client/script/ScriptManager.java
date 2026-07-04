@@ -319,7 +319,7 @@ public final class ScriptManager {
         sb.append("    public static final Status status = Status.INSTANCE;\n"); line++;
         sb.append("    public static final Util util = Util.INSTANCE;\n"); line++;
         sb.append("\n"); line++;
-        sb.append("    private final Modules modules;\n"); line++;
+        sb.append("    final Modules modules;\n"); line++;
         sb.append("    private java.lang.reflect.Method onPacketSendMethod;\n"); line++;
         sb.append("    private java.lang.reflect.Method onPacketReceiveMethod;\n"); line++;
         sb.append("    private java.lang.reflect.Method packetSendPriorityMethod;\n"); line++;
@@ -344,10 +344,16 @@ public final class ScriptManager {
         sb.append("    }\n"); line++;
         sb.append("\n"); line++;
 
-        // onTick — invokes user's onPreUpdate
+        // onTickStart — onPreUpdate once per tick (START). Do NOT also call from onTick:
+        // vehicle scripts + vanilla both send C0C steer; doubling triggers Grim VehicleTimer.
+        sb.append("    @Override\n"); line++;
+        sb.append("    public void onTickStart() {\n"); line++;
+        sb.append("        invokeScript(\"onPreUpdate\");\n"); line++;
+        sb.append("    }\n"); line++;
+        sb.append("\n"); line++;
         sb.append("    @Override\n"); line++;
         sb.append("    public void onTick() {\n"); line++;
-        sb.append("        invokeScript(\"onPreUpdate\");\n"); line++;
+        sb.append("        invokeScript(\"onPostUpdate\");\n"); line++;
         sb.append("    }\n"); line++;
         sb.append("\n"); line++;
 
@@ -438,7 +444,13 @@ public final class ScriptManager {
         sb.append("                target.invoke(this);\n"); line++;
         sb.append("            }\n"); line++;
         sb.append("        } catch (Throwable t) {\n"); line++;
-        sb.append("            GnuLog.log(\"JAVA_ script '\" + scriptName + \"' \" + methodName + \" threw: \" + t);\n"); line++;
+        sb.append("            Throwable cause = t;\n"); line++;
+        sb.append("            if (t instanceof java.lang.reflect.InvocationTargetException\n"); line++;
+        sb.append("                    && ((java.lang.reflect.InvocationTargetException) t).getCause() != null) {\n"); line++;
+        sb.append("                cause = ((java.lang.reflect.InvocationTargetException) t).getCause();\n"); line++;
+        sb.append("            }\n"); line++;
+        sb.append("            GnuLog.log(\"JAVA_ script '\" + scriptName + \"' \" + methodName + \" threw: \"\n"); line++;
+        sb.append("                    + cause.getClass().getSimpleName() + \": \" + cause.getMessage());\n"); line++;
         sb.append("            if (!\"onScriptDisable\".equals(methodName)) {\n"); line++;
         sb.append("                setEnabled(false);\n"); line++;
         sb.append("            }\n"); line++;
@@ -466,8 +478,14 @@ public final class ScriptManager {
             target.invoke(module);
         } catch (NoSuchMethodException ignored) {
         } catch (Throwable t) {
-            GnuLog.log("JAVA_ script generated method '" + methodName + "' failed for "
-                    + module.getName() + ": " + t);
+            Throwable cause = t;
+            if (t instanceof java.lang.reflect.InvocationTargetException
+                    && ((java.lang.reflect.InvocationTargetException) t).getCause() != null) {
+                cause = ((java.lang.reflect.InvocationTargetException) t).getCause();
+            }
+            GnuLog.log("JAVA_ script '" + methodName + "' failed for "
+                    + module.getName() + ": " + cause.getClass().getSimpleName()
+                    + ": " + cause.getMessage());
             try { module.setEnabled(false); } catch (Throwable ignored) {}
         }
     }

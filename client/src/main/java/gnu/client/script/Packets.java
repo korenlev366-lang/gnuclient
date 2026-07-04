@@ -114,6 +114,22 @@ public final class Packets {
         McAccess.setFloat(packet, FIELD_C03_PITCH, pitch);
     }
 
+    public void setMovementPosition(Object packet, double x, double y, double z) {
+        PacketHelper.c03SetPosition(packet, x, y, z);
+    }
+
+    public void setMovementOnGround(Object packet, boolean onGround) {
+        PacketHelper.c03SetOnGround(packet, onGround);
+    }
+
+    public void setVelocityMotionY(Object packet, int motionY) {
+        PacketHelper.velocitySetMotionY(packet, motionY);
+    }
+
+    public boolean isSteerVehicle(Object packet) {
+        return PacketHelper.isSteerVehicle(packet);
+    }
+
     public void sendReleased(Object packet) {
         PacketUtil.sendPacketReleased(packet);
     }
