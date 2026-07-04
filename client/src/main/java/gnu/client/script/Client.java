@@ -168,4 +168,9 @@ public final class Client {
     public void setSprintKey(boolean pressed) {
         McAccess.setSprintKeyState(pressed);
     }
+
+    /** Teleport local player to world coords (micro-step / blink fly). */
+    public void setPlayerPosition(double x, double y, double z) {
+        McAccess.setEntityPosition(getPlayer(), x, y, z);
+    }
 }

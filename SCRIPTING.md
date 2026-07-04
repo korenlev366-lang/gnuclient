@@ -397,14 +397,22 @@ reference first):
 
 ## Grim AC testing (1.8.9)
 
-On-foot fly fights Grim Simulation. **`grim_fly.java`** buffers outbound C03 while you
-move client-side, then releases **one** position packet (not a burst), with optional txn
-delay and velocity inflate to widen the prediction window. Native **Grim Fly** (Player tab)
-is still the boat/vehicle path if you want that exemption.
+On-foot fly fights Grim Simulation unless you abuse a real exemption. **`grim_fly.java`**
+modes (slider 0–3):
+
+| Mode | What it abuses |
+|------|----------------|
+| 0 Vehicle | 1.8.9 `wasChecked=false` while mounted — Simulation skipped (boat/horse/pig/minecart) |
+| 1 Micro | Grim 0.03 point-three position steps — slow creep, packet-synced |
+| 2 Knockback | Inflate inbound S12 — ride KB/explosion lenience window |
+| 3 Blink | Hold C03 + C0F, move client-side, release last packet only |
+
+**Auto vehicle** uses mode 0 whenever you're riding. Native **Grim Fly** module has the same
+Vehicle / Micro / Knockback modes.
 
 | Script | Purpose |
 |--------|---------|
-| `grim_fly.java` | On-foot blink fly + built-in disabler (txn delay, vel inflate) |
+| `grim_fly.java` | Multi-mode fly — vehicle exempt / micro-step / KB / blink |
 | `grim_noslow.java` | Grim NoSlow — C07 release + slot flick (sword block); see below |
 | `grim_disabler.java` | Standalone velocity / txn helpers |
 
