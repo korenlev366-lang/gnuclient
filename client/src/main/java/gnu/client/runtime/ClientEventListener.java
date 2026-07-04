@@ -7,7 +7,9 @@ import gnu.client.module.modules.combat.WTapModule;
 import gnu.client.module.modules.combat.AutoBlockModule;
 import gnu.client.module.modules.network.BacktrackModule;
 import gnu.client.module.modules.network.LagrangeModule;
+import gnu.client.common.GnuLog;
 import gnu.client.runtime.mc.McAccess;
+import gnu.client.script.ScriptManager;
 import net.minecraftforge.fml.common.eventhandler.EventPriority;
 import net.minecraftforge.client.event.MouseEvent;
 import net.minecraftforge.client.event.RenderGameOverlayEvent;
@@ -16,6 +18,7 @@ import net.minecraftforge.client.event.RenderWorldLastEvent;
 import net.minecraftforge.event.entity.player.AttackEntityEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent;
+import org.lwjgl.input.Keyboard;
 
 /**
  * Drives module lifecycle on the Forge event bus ({@link NativeBootstrap#init()}).
@@ -36,6 +39,9 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
  */
 public final class ClientEventListener {
 
+    /** Previous state of the RShift+R reload combo for edge detection. */
+    private static boolean prevReloadCombo = false;
+
     @SubscribeEvent
     public void onClientTick(TickEvent.ClientTickEvent event) {
         if (!McAccess.isResolved())
@@ -45,6 +51,7 @@ public final class ClientEventListener {
             if (McAccess.currentScreen(McAccess.getMinecraft()) == null
                     && !NativeBootstrap.isRebindActive()) {
                 ModuleManager.INSTANCE.handleKeybinds();
+                checkScriptReloadCombo();
                 if (McAccess.isInGame())
                     ModuleManager.INSTANCE.tickStart();
             }
@@ -53,6 +60,26 @@ public final class ClientEventListener {
         if (event.phase != TickEvent.Phase.END)
             return;
         ModuleManager.INSTANCE.tick();
+    }
+
+    /**
+     * Edge-triggered RShift+R combo to manually reload user scripts via
+     * {@link ScriptManager#reloadAll()}. Runs after {@link ModuleManager#handleKeybinds()}
+     * so {@link Keyboard#poll()} has already refreshed LWJGL state. Only fires when no
+     * screen is open and no rebind is active (guarded by the caller in onClientTick).
+     */
+    private static void checkScriptReloadCombo() {
+        boolean combo = Keyboard.isKeyDown(Keyboard.KEY_RSHIFT)
+                && Keyboard.isKeyDown(Keyboard.KEY_R);
+        if (combo && !prevReloadCombo) {
+            GnuLog.log("GUI_ scripts: manual reload triggered");
+            try {
+                ScriptManager.instance().reloadAll();
+            } catch (Throwable t) {
+                GnuLog.log("GUI_ scripts: manual reload failed: " + t);
+            }
+        }
+        prevReloadCombo = combo;
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
