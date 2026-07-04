@@ -106,6 +106,11 @@ constexpr float SZ_LABEL = 14.0f;
 constexpr float SZ_VALUE = 13.0f;
 constexpr float SZ_TAB = 13.0f;
 
+// Number of tabs in the ClickGUI bottom tab bar. Keep in sync with the Java
+// Category enum (ordinal 0..NUM_TABS-1). Bumping a new category onto the bar
+// is a one-line change here instead of hunting down hardcoded literals.
+constexpr int NUM_TABS = 6;
+
 float text_w(ImFont* f, float sz, const char* s) {
     return f->CalcTextSizeA(sz, FLT_MAX, 0.0f, s).x;
 }
@@ -176,7 +181,7 @@ struct ModuleMeta {
 
 std::vector<ModuleMeta> g_meta;
 bool g_meta_built = false;
-int g_tab = 0;       // 0..4 (Combat/Player/Visuals/Misc/Settings)
+int g_tab = 0;       // 0..5 (Combat/Player/Visuals/Misc/Settings/Scripts)
 int g_selected = -1; // index into g_meta
 
 bool g_context_ready = false;
@@ -503,6 +508,13 @@ void draw_tab_icon(ImDrawList* dl, int type, ImVec2 c, ImU32 col) {
         case 4: { // Settings — gear ring
             dl->AddCircle(ImVec2(c.x, c.y), r, col, 20, 1.8f);
             dl->AddCircleFilled(ImVec2(c.x, c.y), 2.5f, col, 12);
+            break;
+        }
+        case 5: { // Scripts — {}
+            dl->AddText(g_font_semibold, SZ_TAB,
+                        ImVec2(c.x - text_w(g_font_semibold, SZ_TAB, "{}") * 0.5f,
+                               c.y - SZ_TAB * 0.5f),
+                        col, "{}");
             break;
         }
     }
@@ -1074,8 +1086,8 @@ void draw() {
     {
         float by = p0.y + aH - BOT_H;
         dl->AddRectFilled(ImVec2(p0.x, by), ImVec2(p0.x + aW, p0.y + aH), U(TAB_BAR));
-        const char* labels[5] = {"Combat", "Player", "Visuals", "Misc", "Settings"};
-        const float tabW = aW / 5.0f;
+        const char* labels[NUM_TABS] = {"Combat", "Player", "Visuals", "Misc", "Settings", "Scripts"};
+        const float tabW = aW / NUM_TABS;
         const float target_x = p0.x + g_tab * tabW + tabW * 0.5f - 20.f;
         if (!g_tab_indicator_init) {
             g_tab_indicator_x = target_x;
@@ -1085,7 +1097,7 @@ void draw() {
         dl->AddRectFilled(ImVec2(g_tab_indicator_x, p0.y + aH - 2.f),
                           ImVec2(g_tab_indicator_x + 40.f, p0.y + aH), U(accent()));
 
-        for (int t = 0; t < 5; ++t) {
+        for (int t = 0; t < NUM_TABS; ++t) {
             ImGui::PushID(1000 + t);
             ImVec2 tmin(p0.x + t * tabW, by);
             ImGui::SetCursorScreenPos(tmin);
