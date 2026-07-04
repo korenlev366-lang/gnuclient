@@ -399,7 +399,8 @@ Scripts (copy from `GNUClient/scripts/examples/`, reload after jar update):
 
 | Script | Purpose |
 |--------|---------|
-| `grim_fly.java` | Boat/minecart fly — motion only, no extra C0C (VehicleTimer-safe) |
-| `grim_disabler.java` | Block S08 setback; optional S12 Y boost |
+| `grim_fly.java` | Server-synced boat steer (cancel vanilla C0C + one/tick) |
+| `grim_disabler.java` | S12 boost only — **BlockSetback off** (causes BadPacketsN) |
 
-Log results in `gnu client dev/Grim-bypass-log.md`. Requires a boat — on-foot does nothing.
+Log results in `gnu client dev/Grim-bypass-log.md`. Requires a boat. Air fly is limited
+on 1.8.9 (server physics); water/ground hop works via jump steer.

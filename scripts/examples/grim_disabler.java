@@ -1,9 +1,10 @@
-// Grim disabler — companion for grim_fly on your own test server.
-// BlockSetback: eat S08 teleports. BoostVelocity: multiply inbound S12 Y.
+// Grim disabler — test helpers for your own Grim server.
 // Copy to ~/.config/gnuclient/scripts/ and Reload Scripts.
+//
+// BlockSetback causes BadPacketsN — default OFF. See Grim-bypass-log.md.
 
 void onLoad() {
-    modules.registerButton("BlockSetback", true);
+    modules.registerButton("BlockSetback", false);
     modules.registerButton("BoostVelocity", false);
     modules.registerSlider("VelMult", 2.0f, 1.0f, 5.0f);
 }
