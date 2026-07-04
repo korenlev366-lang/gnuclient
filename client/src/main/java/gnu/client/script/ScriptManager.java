@@ -243,6 +243,9 @@ public final class ScriptManager {
         // Register with ModuleManager.
         ModuleManager.INSTANCE.register(module);
 
+        // Cache optional generated packet hooks before ConfigManager.load() can enable the script.
+        invokeGeneratedMethod(module, clazz, "__gnuCachePacketHooks");
+
         // Call onLoad — registers settings before ConfigManager.load() runs.
         invokeUserMethod(module, clazz, "onLoad", gs.startingLine);
 
@@ -288,10 +291,13 @@ public final class ScriptManager {
         sb.append("import gnu.client.module.setting.SliderSetting;\n"); line++;
         sb.append("import gnu.client.runtime.NativeBootstrap;\n"); line++;
         sb.append("import gnu.client.runtime.mc.McAccess;\n"); line++;
+        sb.append("import gnu.client.runtime.packet.PacketEvents;\n"); line++;
+        sb.append("import gnu.client.runtime.packet.PacketListener;\n"); line++;
         sb.append("import gnu.client.script.Client;\n"); line++;
         sb.append("import gnu.client.script.Inventory;\n"); line++;
         sb.append("import gnu.client.script.Keybinds;\n"); line++;
         sb.append("import gnu.client.script.Modules;\n"); line++;
+        sb.append("import gnu.client.script.Packets;\n"); line++;
         sb.append("import gnu.client.script.Util;\n"); line++;
         sb.append("import gnu.client.script.World;\n"); line++;
         sb.append("import java.util.ArrayList;\n"); line++;
@@ -301,16 +307,22 @@ public final class ScriptManager {
         sb.append("import java.util.Random;\n"); line++;
         sb.append("\n"); line++;
 
-        sb.append("public final class ").append(className).append(" extends Module {\n"); line++;
+        sb.append("public final class ").append(className).append(" extends Module implements PacketListener {\n"); line++;
         sb.append("\n"); line++;
         sb.append("    public static final String scriptName = \"").append(safeName).append("\";\n"); line++;
         sb.append("    public static final Client client = Client.INSTANCE;\n"); line++;
         sb.append("    public static final World world = World.INSTANCE;\n"); line++;
         sb.append("    public static final Keybinds keybinds = Keybinds.INSTANCE;\n"); line++;
         sb.append("    public static final Inventory inventory = Inventory.INSTANCE;\n"); line++;
+        sb.append("    public static final Packets packets = Packets.INSTANCE;\n"); line++;
         sb.append("    public static final Util util = Util.INSTANCE;\n"); line++;
         sb.append("\n"); line++;
         sb.append("    private final Modules modules;\n"); line++;
+        sb.append("    private java.lang.reflect.Method onPacketSendMethod;\n"); line++;
+        sb.append("    private java.lang.reflect.Method onPacketReceiveMethod;\n"); line++;
+        sb.append("    private java.lang.reflect.Method packetSendPriorityMethod;\n"); line++;
+        sb.append("    private boolean hasPacketHooks;\n"); line++;
+        sb.append("    private boolean packetEventsRegistered;\n"); line++;
         sb.append("\n"); line++;
 
         // Constructor
@@ -320,9 +332,13 @@ public final class ScriptManager {
         sb.append("    }\n"); line++;
         sb.append("\n"); line++;
 
-        // onEnable — no-op (onLoad is called by ScriptManager at registration, not here)
+        // onEnable — packet listener registration is lazy for scripts that declare packet hooks.
         sb.append("    @Override\n"); line++;
         sb.append("    public void onEnable() {\n"); line++;
+        sb.append("        if (hasPacketHooks && !packetEventsRegistered) {\n"); line++;
+        sb.append("            PacketEvents.register(this);\n"); line++;
+        sb.append("            packetEventsRegistered = true;\n"); line++;
+        sb.append("        }\n"); line++;
         sb.append("    }\n"); line++;
         sb.append("\n"); line++;
 
@@ -336,7 +352,71 @@ public final class ScriptManager {
         // onDisable — invokes user's onScriptDisable (NOT onDisable — name collision)
         sb.append("    @Override\n"); line++;
         sb.append("    public void onDisable() {\n"); line++;
+        sb.append("        PacketEvents.unregister(this);\n"); line++;
+        sb.append("        packetEventsRegistered = false;\n"); line++;
         sb.append("        invokeScript(\"onScriptDisable\");\n"); line++;
+        sb.append("    }\n"); line++;
+        sb.append("\n"); line++;
+
+        // PacketListener — optional script hooks cached once at load time.
+        sb.append("    /**\n"); line++;
+        sb.append("     * Packet hooks follow native PacketListener threading. onPacketReceive(Object)\n"); line++;
+        sb.append("     * runs on Netty's channel thread, not the main client thread; script state\n"); line++;
+        sb.append("     * shared with onPreUpdate() must be treated as cross-thread state.\n"); line++;
+        sb.append("     */\n"); line++;
+        sb.append("    public void __gnuCachePacketHooks() {\n"); line++;
+        sb.append("        onPacketSendMethod = findScriptMethod(\"onPacketSend\", boolean.class, Object.class);\n"); line++;
+        sb.append("        onPacketReceiveMethod = findScriptMethod(\"onPacketReceive\", boolean.class, Object.class);\n"); line++;
+        sb.append("        packetSendPriorityMethod = findScriptMethod(\"packetSendPriority\", int.class);\n"); line++;
+        sb.append("        hasPacketHooks = onPacketSendMethod != null || onPacketReceiveMethod != null;\n"); line++;
+        sb.append("    }\n"); line++;
+        sb.append("\n"); line++;
+        sb.append("    @Override\n"); line++;
+        sb.append("    public boolean onSend(Object packet) {\n"); line++;
+        sb.append("        return invokePacketHook(onPacketSendMethod, packet, \"onPacketSend\");\n"); line++;
+        sb.append("    }\n"); line++;
+        sb.append("\n"); line++;
+        sb.append("    @Override\n"); line++;
+        sb.append("    public boolean onReceive(Object packet) {\n"); line++;
+        sb.append("        return invokePacketHook(onPacketReceiveMethod, packet, \"onPacketReceive\");\n"); line++;
+        sb.append("    }\n"); line++;
+        sb.append("\n"); line++;
+        sb.append("    @Override\n"); line++;
+        sb.append("    public int sendPriority() {\n"); line++;
+        sb.append("        if (packetSendPriorityMethod == null)\n"); line++;
+        sb.append("            return -100;\n"); line++;
+        sb.append("        try {\n"); line++;
+        sb.append("            Object result = packetSendPriorityMethod.invoke(this);\n"); line++;
+        sb.append("            return result instanceof Integer ? (Integer) result : -100;\n"); line++;
+        sb.append("        } catch (Throwable t) {\n"); line++;
+        sb.append("            GnuLog.log(\"JAVA_ script '\" + scriptName + \"' packetSendPriority threw: \" + t);\n"); line++;
+        sb.append("            return -100;\n"); line++;
+        sb.append("        }\n"); line++;
+        sb.append("    }\n"); line++;
+        sb.append("\n"); line++;
+        sb.append("    private java.lang.reflect.Method findScriptMethod(String name, Class<?> returnType, Class<?>... params) {\n"); line++;
+        sb.append("        try {\n"); line++;
+        sb.append("            java.lang.reflect.Method m = getClass().getDeclaredMethod(name, params);\n"); line++;
+        sb.append("            if (m.getReturnType() != returnType)\n"); line++;
+        sb.append("                return null;\n"); line++;
+        sb.append("            m.setAccessible(true);\n"); line++;
+        sb.append("            return m;\n"); line++;
+        sb.append("        } catch (NoSuchMethodException ignored) {\n"); line++;
+        sb.append("            return null;\n"); line++;
+        sb.append("        }\n"); line++;
+        sb.append("    }\n"); line++;
+        sb.append("\n"); line++;
+        sb.append("    private boolean invokePacketHook(java.lang.reflect.Method method, Object packet, String methodName) {\n"); line++;
+        sb.append("        if (method == null)\n"); line++;
+        sb.append("            return false;\n"); line++;
+        sb.append("        try {\n"); line++;
+        sb.append("            Object result = method.invoke(this, packet);\n"); line++;
+        sb.append("            return result instanceof Boolean && (Boolean) result;\n"); line++;
+        sb.append("        } catch (Throwable t) {\n"); line++;
+        sb.append("            GnuLog.log(\"JAVA_ script '\" + scriptName + \"' \" + methodName + \" threw: \" + t);\n"); line++;
+        sb.append("            try { setEnabled(false); } catch (Throwable ignored) {}\n"); line++;
+        sb.append("            return false;\n"); line++;
+        sb.append("        }\n"); line++;
         sb.append("    }\n"); line++;
         sb.append("\n"); line++;
 
@@ -375,6 +455,20 @@ public final class ScriptManager {
     }
 
     // ===================== reflective invocation =====================
+
+    /** Invoke a generated no-arg method on the script wrapper itself. */
+    private void invokeGeneratedMethod(Module module, Class<?> clazz, String methodName) {
+        try {
+            java.lang.reflect.Method target = clazz.getDeclaredMethod(methodName);
+            target.setAccessible(true);
+            target.invoke(module);
+        } catch (NoSuchMethodException ignored) {
+        } catch (Throwable t) {
+            GnuLog.log("JAVA_ script generated method '" + methodName + "' failed for "
+                    + module.getName() + ": " + t);
+            try { module.setEnabled(false); } catch (Throwable ignored) {}
+        }
+    }
 
     /**
      * Invoke a user-declared no-arg void method on the script instance.
