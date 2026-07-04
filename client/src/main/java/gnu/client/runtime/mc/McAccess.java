@@ -1594,6 +1594,52 @@ public final class McAccess {
 
     private static final java.util.Random SHARED_RANDOM = new java.util.Random();
 
+    public static double getMotionX() {
+        Object player = thePlayer();
+        if (player == null)
+            return 0.0;
+        return getDouble(player, "field_70159_w");
+    }
+
+    public static double getMotionY() {
+        Object player = thePlayer();
+        if (player == null)
+            return 0.0;
+        return getDouble(player, "field_70181_x");
+    }
+
+    public static double getMotionZ() {
+        Object player = thePlayer();
+        if (player == null)
+            return 0.0;
+        return getDouble(player, "field_70179_y");
+    }
+
+    public static float getYaw() {
+        Object player = thePlayer();
+        if (player == null)
+            return 0.0f;
+        return getFloat(player, "field_70177_z");
+    }
+
+    public static float getPitch() {
+        Object player = thePlayer();
+        if (player == null)
+            return 0.0f;
+        return getFloat(player, "field_70125_A");
+    }
+
+    public static boolean isOnGround() {
+        Object player = thePlayer();
+        if (player == null)
+            return false;
+        return getBool(player, "field_70122_E");
+    }
+
+    public static boolean isSneaking() {
+        return isSneaking(thePlayer());
+    }
+
     public static void setRotation(float yaw, float pitch) {
         Object player = thePlayer();
         if (player == null)

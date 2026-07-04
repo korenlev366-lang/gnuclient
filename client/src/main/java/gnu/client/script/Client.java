@@ -41,6 +41,38 @@ public final class Client {
         return McAccess.raycastBlocks(distance, yaw, pitch);
     }
 
+    public double getMotionX() {
+        return McAccess.getMotionX();
+    }
+
+    public double getMotionY() {
+        return McAccess.getMotionY();
+    }
+
+    public double getMotionZ() {
+        return McAccess.getMotionZ();
+    }
+
+    public float getYaw() {
+        return McAccess.getYaw();
+    }
+
+    public float getPitch() {
+        return McAccess.getPitch();
+    }
+
+    public boolean isOnGround() {
+        return McAccess.isOnGround();
+    }
+
+    public boolean isSneaking() {
+        return McAccess.isSneaking();
+    }
+
+    public boolean isSprinting() {
+        return McAccess.isClientSprinting();
+    }
+
     public void setRotation(float yaw, float pitch) {
         McAccess.setRotation(yaw, pitch);
     }
