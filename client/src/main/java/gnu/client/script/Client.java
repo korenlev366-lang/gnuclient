@@ -169,6 +169,27 @@ public final class Client {
         McAccess.setSprintKeyState(pressed);
     }
 
+    public void setForwardKey(boolean pressed) {
+        McAccess.setForwardKeyState(pressed);
+    }
+
+    public void setBackKey(boolean pressed) {
+        McAccess.setBackKeyState(pressed);
+    }
+
+    public void setLeftKey(boolean pressed) {
+        McAccess.setLeftKeyState(pressed);
+    }
+
+    public void setRightKey(boolean pressed) {
+        McAccess.setRightKeyState(pressed);
+    }
+
+    /** Force local onGround after setback snap (pairs with C03 ground sync). */
+    public void setOnGround(boolean onGround) {
+        McAccess.setOnGround(getPlayer(), onGround);
+    }
+
     /** Teleport local player to world coords (micro-step / blink fly). */
     public void setPlayerPosition(double x, double y, double z) {
         McAccess.setEntityPosition(getPlayer(), x, y, z);

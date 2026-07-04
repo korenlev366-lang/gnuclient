@@ -441,6 +441,53 @@ public final class PacketHelper {
         return classNameContains(packet, "S27PacketExplosion");
     }
 
+    private static float readExplosionMotionComponent(Object packet, String srg, String mcp) {
+        if (!isExplosion(packet))
+            return 0f;
+        try {
+            float v = McAccess.getFloat(packet, srg);
+            if (v != 0f)
+                return v;
+        } catch (Throwable ignored) {
+        }
+        Object boxed = McAccess.invoke(packet, mcp, new Class<?>[0]);
+        if (boxed instanceof Float)
+            return (Float) boxed;
+        if (boxed instanceof Double)
+            return ((Double) boxed).floatValue();
+        return McAccess.getFloat(packet, srg);
+    }
+
+    private static void writeExplosionMotionComponent(Object packet, String srg, float value) {
+        if (!isExplosion(packet))
+            return;
+        McAccess.setFloat(packet, srg, value);
+    }
+
+    public static float explosionMotionX(Object packet) {
+        return readExplosionMotionComponent(packet, "field_149152_a", "func_149149_c");
+    }
+
+    public static float explosionMotionY(Object packet) {
+        return readExplosionMotionComponent(packet, "field_149150_b", "func_149144_d");
+    }
+
+    public static float explosionMotionZ(Object packet) {
+        return readExplosionMotionComponent(packet, "field_149151_c", "func_149147_e");
+    }
+
+    public static void explosionSetMotionX(Object packet, float motionX) {
+        writeExplosionMotionComponent(packet, "field_149152_a", motionX);
+    }
+
+    public static void explosionSetMotionY(Object packet, float motionY) {
+        writeExplosionMotionComponent(packet, "field_149150_b", motionY);
+    }
+
+    public static void explosionSetMotionZ(Object packet, float motionZ) {
+        writeExplosionMotionComponent(packet, "field_149151_c", motionZ);
+    }
+
     public static boolean isAnimationPacket(Object packet) {
         return classNameContains(packet, "C0APacketAnimation");
     }
@@ -538,6 +585,50 @@ public final class PacketHelper {
 
     public static boolean isPlayerPosLook(Object packet) {
         return classNameContains(packet, "S08PacketPlayerPosLook");
+    }
+
+    public static double posLookX(Object packet) {
+        return readPosLookDouble(packet, "field_148940_a", "func_148932_c");
+    }
+
+    public static double posLookY(Object packet) {
+        return readPosLookDouble(packet, "field_148938_b", "func_148928_d");
+    }
+
+    public static double posLookZ(Object packet) {
+        return readPosLookDouble(packet, "field_148939_c", "func_148933_e");
+    }
+
+    public static float posLookYaw(Object packet) {
+        return readPosLookFloat(packet, "field_148936_d", "func_148931_f");
+    }
+
+    public static float posLookPitch(Object packet) {
+        return readPosLookFloat(packet, "field_148937_e", "func_148929_g");
+    }
+
+    private static double readPosLookDouble(Object packet, String srg, String mcp) {
+        if (!isPlayerPosLook(packet))
+            return Double.NaN;
+        double v = McAccess.getDouble(packet, srg);
+        if (!Double.isNaN(v) && v != 0.0)
+            return v;
+        Object boxed = McAccess.invoke(packet, mcp, new Class<?>[0]);
+        if (boxed instanceof Number)
+            return ((Number) boxed).doubleValue();
+        return McAccess.getDouble(packet, srg);
+    }
+
+    private static float readPosLookFloat(Object packet, String srg, String mcp) {
+        if (!isPlayerPosLook(packet))
+            return Float.NaN;
+        float v = McAccess.getFloat(packet, srg);
+        Object boxed = McAccess.invoke(packet, mcp, new Class<?>[0]);
+        if (boxed instanceof Float)
+            return (Float) boxed;
+        if (boxed instanceof Double)
+            return ((Double) boxed).floatValue();
+        return v;
     }
 
     public static boolean isDisconnect(Object packet) {

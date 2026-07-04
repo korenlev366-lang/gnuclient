@@ -104,7 +104,7 @@ All optional (a script with none of these is legal but does nothing).
 | `onPreUpdate` | `void onPreUpdate()` | Once per tick at **ClientTick START** | Main tick logic |
 | `onPostUpdate` | `void onPostUpdate()` | Once per tick at **ClientTick END** (optional) | End-of-tick logic |
 | `onScriptDisable` | `void onScriptDisable()` | When the module is disabled | **Not** `onDisable` — that name collides with `Module`'s own override. Use `onScriptDisable`. |
-| `itemUseSlowTarget` | `float itemUseSlowTarget()` | Each tick at **MovementInput** update (before vanilla 0.2× item slow) | Return desired move multiplier (`1.0` = full speed, `0.2` = vanilla). Return `< 0` to skip. Used by `grim_noslow.java`. Skipped if native **NoSlow** module is enabled. |
+| `itemUseSlowTarget` | `float itemUseSlowTarget()` | Each tick at **MovementInput** update (before vanilla 0.2× item slow) | Return desired move multiplier (`1.0` = full speed, `0.2` = vanilla). Return `< 0` to skip. Used by `grim_noslow.java`. |
 
 If any of these throws, the error is logged (`GnuLog`, visible in
 `/tmp/gnu_debug.log`) and the script's module is automatically disabled
@@ -302,6 +302,12 @@ boolean isSelfVelocity(Object packet)      // S12, self only
 boolean isExplosion(Object packet)
 boolean isPlayerPosLook(Object packet)
 
+double  posLookX(Object packet)           // S08 setback/teleport
+double  posLookY(Object packet)
+double  posLookZ(Object packet)
+float   posLookYaw(Object packet)
+float   posLookPitch(Object packet)
+
 String  simpleName(Object packet)          // e.g. "C03PacketPlayer" — for logging/debugging
 int     entityId(Object packet)            // -1 if not applicable
 
@@ -313,6 +319,16 @@ boolean movementOnGround(Object packet)
 int     velocityMotionX(Object packet)
 int     velocityMotionY(Object packet)
 int     velocityMotionZ(Object packet)
+void    setVelocityMotionX(Object packet, int motionX)
+void    setVelocityMotionY(Object packet, int motionY)
+void    setVelocityMotionZ(Object packet, int motionZ)
+
+float   explosionMotionX(Object packet)    // S27 knockback X
+float   explosionMotionY(Object packet)
+float   explosionMotionZ(Object packet)
+void    setExplosionMotionX(Object packet, float motionX)
+void    setExplosionMotionY(Object packet, float motionY)
+void    setExplosionMotionZ(Object packet, float motionZ)
 
 void    setMovementRotation(Object packet, float yaw, float pitch)
                                             // rewrites yaw/pitch on a C03 packet in place
@@ -407,14 +423,46 @@ modes (slider 0–3):
 | 2 Knockback | Inflate inbound S12 — ride KB/explosion lenience window |
 | 3 Blink | Hold C03 + C0F, move client-side, release last packet only |
 
-**Auto vehicle** uses mode 0 whenever you're riding. Native **Grim Fly** module has the same
-Vehicle / Micro / Knockback modes.
+**Auto vehicle** uses mode 0 whenever you're riding.
 
 | Script | Purpose |
 |--------|---------|
 | `grim_fly.java` | Multi-mode fly — vehicle exempt / micro-step / KB / blink |
+| `grim_speed.java` | On-foot speed — bhop / micro-step / KB / timer (no motion scaling) |
+| `grim_movement_disabler.java` | Setback accept + C03 sync + KB/expl window tracking (softens, no speed) |
 | `grim_noslow.java` | Grim NoSlow — C07 release + slot flick (sword block); see below |
-| `grim_disabler.java` | Standalone velocity / txn helpers |
+| `grim_disabler.java` | **Legacy** — velocity inflate / txn delay (flags Simulation/Timer; defaults off) |
+
+### grim_speed.java
+
+On-foot alternative when fly fights Grim Simulation. **Does not scale `client.setMotion`**
+(motion loops flag Simulation). Modes (slider 0–3):
+
+| Mode | What it does |
+|------|----------------|
+| 0 Bhop | Auto sprint + ground jump — vanilla input only |
+| 1 Micro | Horizontal 0.03 C03 steps with `onGround=true` (point-three window) |
+| 2 Knockback | Inflate inbound S12 — ride KB lenience window |
+| 3 Timer | Subtle timer boost while moving (Grim Timer may flag — test only) |
+
+Disabled automatically while riding. Resets timer on disable.
+
+### grim_movement_disabler.java
+
+Softens movement checks — **does not speed you up**. The old version (txn delay,
+velocity inflate, motion boost) caused Simulation, Timer, BadPacketsN, and GroundSpoof.
+
+| Feature | Softens | Notes |
+|---------|---------|-------|
+| Accept setbacks | BadPacketsN | Snap client to S08; Grim clears teleport queue |
+| Setback lock + sync ground | GroundSpoof | C03 matches snapped pos for a few ticks |
+| Track KB / expl window | AntiKB / AntiExplosion | Marks lenience after **unmodified** S12/S27 |
+
+Grim runs on the **server**. Inbound packet edits only change your client — server
+still predicts from what it sent. Disablers must fix what the server sees (C03/S08
+acceptance), not inflate what you receive.
+
+Use `grim_speed` separately only after this runs clean. Never block S08.
 
 ### grim_noslow.java
 

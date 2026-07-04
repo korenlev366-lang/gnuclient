@@ -74,6 +74,26 @@ public final class Packets {
         return PacketHelper.isPlayerPosLook(packet);
     }
 
+    public double posLookX(Object packet) {
+        return PacketHelper.posLookX(packet);
+    }
+
+    public double posLookY(Object packet) {
+        return PacketHelper.posLookY(packet);
+    }
+
+    public double posLookZ(Object packet) {
+        return PacketHelper.posLookZ(packet);
+    }
+
+    public float posLookYaw(Object packet) {
+        return PacketHelper.posLookYaw(packet);
+    }
+
+    public float posLookPitch(Object packet) {
+        return PacketHelper.posLookPitch(packet);
+    }
+
     public String simpleName(Object packet) {
         return packet == null ? "" : packet.getClass().getSimpleName();
     }
@@ -136,6 +156,30 @@ public final class Packets {
 
     public void setVelocityMotionZ(Object packet, int motionZ) {
         PacketHelper.velocitySetMotionZ(packet, motionZ);
+    }
+
+    public float explosionMotionX(Object packet) {
+        return PacketHelper.explosionMotionX(packet);
+    }
+
+    public float explosionMotionY(Object packet) {
+        return PacketHelper.explosionMotionY(packet);
+    }
+
+    public float explosionMotionZ(Object packet) {
+        return PacketHelper.explosionMotionZ(packet);
+    }
+
+    public void setExplosionMotionX(Object packet, float motionX) {
+        PacketHelper.explosionSetMotionX(packet, motionX);
+    }
+
+    public void setExplosionMotionY(Object packet, float motionY) {
+        PacketHelper.explosionSetMotionY(packet, motionY);
+    }
+
+    public void setExplosionMotionZ(Object packet, float motionZ) {
+        PacketHelper.explosionSetMotionZ(packet, motionZ);
     }
 
     public boolean isSteerVehicle(Object packet) {

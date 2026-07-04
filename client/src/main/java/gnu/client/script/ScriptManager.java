@@ -296,6 +296,7 @@ public final class ScriptManager {
         sb.append("import gnu.client.runtime.packet.PacketEvents;\n"); line++;
         sb.append("import gnu.client.runtime.packet.PacketListener;\n"); line++;
         sb.append("import gnu.client.script.Client;\n"); line++;
+        sb.append("import gnu.client.script.GrimState;\n"); line++;
         sb.append("import gnu.client.script.Inventory;\n"); line++;
         sb.append("import gnu.client.script.Keybinds;\n"); line++;
         sb.append("import gnu.client.script.Modules;\n"); line++;
@@ -314,6 +315,7 @@ public final class ScriptManager {
         sb.append("\n"); line++;
         sb.append("    public static final String scriptName = \"").append(safeName).append("\";\n"); line++;
         sb.append("    public static final Client client = Client.INSTANCE;\n"); line++;
+        sb.append("    public static final GrimState grim = GrimState.INSTANCE;\n"); line++;
         sb.append("    public static final World world = World.INSTANCE;\n"); line++;
         sb.append("    public static final Keybinds keybinds = Keybinds.INSTANCE;\n"); line++;
         sb.append("    public static final Inventory inventory = Inventory.INSTANCE;\n"); line++;
@@ -477,9 +479,6 @@ public final class ScriptManager {
      */
     public void patchMovementInput(Object movInput) {
         if (movInput == null)
-            return;
-        Module nativeNoSlow = ModuleManager.INSTANCE.getModule("NoSlow");
-        if (nativeNoSlow != null && nativeNoSlow.isEnabled())
             return;
 
         for (LoadedScript ls : loaded.values()) {

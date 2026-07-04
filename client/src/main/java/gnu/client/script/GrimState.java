@@ -1,0 +1,63 @@
+package gnu.client.script;
+
+import java.util.concurrent.atomic.AtomicInteger;
+
+/**
+ * Thread-safe shared Grim lenience state for script disablers and speed modules.
+ * Updated from {@code onPacketReceive} (Netty thread) and decayed from
+ * {@code onPreUpdate} (main thread).
+ */
+public final class GrimState {
+
+    public static final GrimState INSTANCE = new GrimState();
+
+    private final AtomicInteger setbackTicks = new AtomicInteger(0);
+    private final AtomicInteger kbWindow = new AtomicInteger(0);
+    private final AtomicInteger explWindow = new AtomicInteger(0);
+
+    private GrimState() {}
+
+    public boolean lenient() {
+        return setbackTicks.get() > 0 || kbWindow.get() > 0 || explWindow.get() > 0;
+    }
+
+    public int getSetbackTicks() {
+        return setbackTicks.get();
+    }
+
+    public int getKbWindow() {
+        return kbWindow.get();
+    }
+
+    public int getExplWindow() {
+        return explWindow.get();
+    }
+
+    public void setSetbackTicks(int ticks) {
+        setbackTicks.set(Math.max(0, ticks));
+    }
+
+    public void bumpKbWindow(int ticks) {
+        if (ticks < 1)
+            return;
+        kbWindow.updateAndGet(current -> Math.max(current, ticks));
+    }
+
+    public void bumpExplWindow(int ticks) {
+        if (ticks < 1)
+            return;
+        explWindow.updateAndGet(current -> Math.max(current, ticks));
+    }
+
+    public void decayTick() {
+        setbackTicks.updateAndGet(v -> v > 0 ? v - 1 : 0);
+        kbWindow.updateAndGet(v -> v > 0 ? v - 1 : 0);
+        explWindow.updateAndGet(v -> v > 0 ? v - 1 : 0);
+    }
+
+    public void reset() {
+        setbackTicks.set(0);
+        kbWindow.set(0);
+        explWindow.set(0);
+    }
+}

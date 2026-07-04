@@ -1,7 +1,5 @@
 package gnu.client.runtime;
 
-import gnu.client.module.modules.movement.GrimFlyModule;
-import gnu.client.module.modules.movement.NoSlowModule;
 import gnu.client.module.modules.player.BridgeAssistModule;
 import gnu.client.module.modules.movement.StasisModule;
 import gnu.client.script.ScriptManager;
@@ -15,8 +13,6 @@ public final class MovementInputHook {
 
     public static void afterUpdatePlayerMoveState(Object movementInput) {
         BridgeAssistModule.patchMovementInput(movementInput);
-        GrimFlyModule.patchMovementInput(movementInput);
-        NoSlowModule.patchMovementInput(movementInput);
         ScriptManager.instance().patchMovementInput(movementInput);
         StasisModule.patchPlayerInput(movementInput);
     }

@@ -1,35 +1,18 @@
-// Grim disabler — test helpers for your own Grim server.
+// Grim disabler — LEGACY test helper. Prefer grim_movement_disabler.java for movement.
 // Copy to ~/.config/gnuclient/scripts/ and Reload Scripts.
 //
-// Clever bits (vs just blocking S08):
-//   • Inflate velocity (S12 XYZ) — Grim's KB/explosion sandwich predicts a bigger
-//     vector, so the offset window is wider for a few ticks after each hit.
-//   • Txn delay — hold C0F confirms briefly so velocity sandwiches stay in the
-//     "first bread" uncertain state longer (wider prediction tolerance).
-//
-// BlockSetback still causes BadPacketsN — default OFF. See Grim-bypass-log.md.
-// Do NOT use Dummy steer with Grim Fly — extra C0C/tick flags VehicleTimer.
-
-List<Object> txnBuffer = new ArrayList<Object>();
-long txnHoldStart = 0;
+// WARNING: Inbound velocity inflate does NOT change what server Grim predicts — it only
+// makes your client move more than the server expects → Simulation flags.
+// Txn delay holds C0F → Timer + BadPacketsN when combined with setbacks.
+// BlockSetback (cancel S08) → BadPacketsN guaranteed.
 
 void onLoad() {
     modules.registerButton("BlockSetback", false);
-    modules.registerButton("Inflate velocity", true);
-    modules.registerSlider("VelMult", 2.0f, 1.0f, 5.0f);
-    modules.registerButton("Include down", true);
+    modules.registerButton("Inflate velocity", false);
+    modules.registerSlider("VelMult", 1.0f, 1.0f, 3.0f);
+    modules.registerButton("Include down", false);
     modules.registerButton("Txn delay", false);
-    modules.registerSlider("Txn delay ms", 50f, 0f, 200f);
-}
-
-boolean onPacketSend(Object packet) {
-    if (modules.getButton("Txn delay") && packets.isClientTransaction(packet)) {
-        if (txnHoldStart == 0)
-            txnHoldStart = client.time();
-        txnBuffer.add(packet);
-        return true;
-    }
-    return false;
+    modules.registerSlider("Txn delay ms", 0f, 0f, 100f);
 }
 
 boolean onPacketReceive(Object packet) {
@@ -54,23 +37,4 @@ boolean onPacketReceive(Object packet) {
             packets.setVelocityMotionY(packet, (int) (my * mult));
     }
     return false;
-}
-
-void onPreUpdate() {
-    if (modules.getButton("Txn delay") && !txnBuffer.isEmpty()) {
-        long delay = (long) modules.getSlider("Txn delay ms");
-        if (client.time() - txnHoldStart >= delay) {
-            for (Object p : txnBuffer)
-                packets.sendReleased(p);
-            txnBuffer.clear();
-            txnHoldStart = 0;
-        }
-    }
-}
-
-void onScriptDisable() {
-    for (Object p : txnBuffer)
-        packets.sendReleased(p);
-    txnBuffer.clear();
-    txnHoldStart = 0;
 }

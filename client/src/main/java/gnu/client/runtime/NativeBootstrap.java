@@ -17,8 +17,6 @@ import gnu.client.module.modules.combat.VelocityModule;
 import gnu.client.module.modules.player.BridgeAssistModule;
 import gnu.client.module.modules.movement.FastStopModule;
 import gnu.client.module.modules.movement.SprintModule;
-import gnu.client.module.modules.movement.GrimFlyModule;
-import gnu.client.module.modules.movement.NoSlowModule;
 import gnu.client.module.modules.movement.StasisModule;
 import gnu.client.module.modules.player.FastPlaceModule;
 
@@ -140,16 +138,6 @@ public final class NativeBootstrap {
                 GnuLog.log("MODULE FAIL FastPlaceModule: " + e);
             }
 
-            try {
-                mgr.register(new NoSlowModule());
-            } catch (Exception e) {
-                GnuLog.log("MODULE FAIL NoSlowModule: " + e);
-            }
-            try {
-                mgr.register(new GrimFlyModule());
-            } catch (Exception e) {
-                GnuLog.log("MODULE FAIL GrimFlyModule: " + e);
-            }
             try {
                 mgr.register(new StasisModule());
             } catch (Exception e) {

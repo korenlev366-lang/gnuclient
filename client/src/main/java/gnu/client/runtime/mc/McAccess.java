@@ -1859,6 +1859,13 @@ public final class McAccess {
         return getBool(player, "field_70122_E");
     }
 
+    /** {@code Entity.onGround} — used after S08 setback snap for C03 sync. */
+    public static void setOnGround(Object entity, boolean onGround) {
+        if (entity == null)
+            return;
+        setBool(entity, "field_70122_E", onGround);
+    }
+
     public static boolean isSneaking() {
         return isSneaking(thePlayer());
     }
