@@ -68,6 +68,7 @@ public final class ScriptManager {
 
     private static final String SCRIPTS_DIR;
     private static final String COMPILED_DIR;
+    private static final String SCRIPT_PACKAGE = "gnu.client.script.generated";
 
     static {
         String home = System.getProperty("user.home");
@@ -177,8 +178,9 @@ public final class ScriptManager {
         if (userBody == null || userBody.isEmpty())
             return false;
 
-        String className = "sc_" + safeName + "_" + randomSuffix(5);
-        GeneratedSource gs = generateWrapper(className, safeName, userBody);
+        String simpleName = "sc_" + safeName + "_" + randomSuffix(5);
+        String fqn = SCRIPT_PACKAGE + "." + simpleName;
+        GeneratedSource gs = generateWrapper(simpleName, safeName, userBody);
 
         // Compile to COMPILED_DIR.
         List<String> options = new ArrayList<>();
@@ -192,7 +194,7 @@ public final class ScriptManager {
         }
 
         DiagnosticCollector<JavaFileObject> diags = new DiagnosticCollector<>();
-        JavaFileObject source = new StringSource(className, gs.source);
+        JavaFileObject source = new StringSource(fqn, gs.source);
         boolean ok = compiler.getTask(null, compiler.getStandardFileManager(diags, null, null),
                 diags, options, null, Arrays.asList(source)).call();
         if (!ok) {
@@ -212,7 +214,7 @@ public final class ScriptManager {
             URL compiledUrl = new File(COMPILED_DIR).toURI().toURL();
             loader = new URLClassLoader(new URL[] { compiledUrl },
                     ScriptManager.class.getClassLoader());
-            clazz = loader.loadClass(className);
+            clazz = loader.loadClass(fqn);
             Object instance = clazz.newInstance();
             if (!(instance instanceof Module)) {
                 GnuLog.log("JAVA_ script " + safeName + " loaded class is not a Module: "
@@ -233,7 +235,7 @@ public final class ScriptManager {
         invokeUserMethod(module, clazz, "onLoad", gs.startingLine);
 
         loaded.put(safeName, new LoadedScript(safeName, module, loader, gs.startingLine));
-        GnuLog.log("JAVA_ script loaded: " + safeName + " class=" + className);
+        GnuLog.log("JAVA_ script loaded: " + safeName + " class=" + fqn);
         return true;
     }
 
