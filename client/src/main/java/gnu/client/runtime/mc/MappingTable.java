@@ -48,6 +48,8 @@ public final class MappingTable {
         MCP_TO_NOTCH_CLASS.put("net.minecraft.client.settings.KeyboardInput", "bhd");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.client.settings.MovementInputFromOptions", "bhc");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.client.entity.EntityPlayerSP", "bli");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.network.play.client.C0CPacketInput", "in");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.entity.item.EntityBoat", "uz");
 
         // ---- Minecraft fields ----
         putField("field_71439_g", "h");   // thePlayer
@@ -100,6 +102,16 @@ public final class MappingTable {
         putField("field_78902_a", "c");   // moveStrafe (MovementInput)
         putField("field_78900_b", "b");   // moveForward (MovementInput)
         putField("field_78901_c", "d");   // jump (MovementInput)
+
+        // ---- C0CPacketInput (boat steer) ----
+        putField("field_149618_a", "a");  // strafeSpeed
+        putField("field_149617_b", "b");  // forwardSpeed
+        putField("field_149619_c", "c");  // jumping
+        putField("field_149616_d", "d");  // sneaking
+        putMcpMember("field_149618_a", "strafeSpeed");
+        putMcpMember("field_149617_b", "forwardSpeed");
+        putMcpMember("field_149619_c", "jumping");
+        putMcpMember("field_149616_d", "sneaking");
         putField("field_175171_bO", "bL"); // serverSprintState
 
         // ---- GameSettings keybinds ----

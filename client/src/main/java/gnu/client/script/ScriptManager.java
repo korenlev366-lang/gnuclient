@@ -84,6 +84,8 @@ public final class ScriptManager {
         return INSTANCE;
     }
 
+    private static final float VANILLA_ITEM_SLOW = 0.2f;
+
     private final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
     private final Map<String, LoadedScript> loaded = new LinkedHashMap<>();
     private final Random random = new Random();
@@ -468,6 +470,35 @@ public final class ScriptManager {
         return new GeneratedSource(sb.toString(), startingLine);
     }
 
+    /**
+     * Optional script hook {@code float itemUseSlowTarget()} — return desired item-use
+     * move multiplier (1.0 = full speed, 0.2 = vanilla). Return {@code < 0} to skip.
+     * Applied at MovementInput update, before vanilla's 0.2× slow (Raven-style).
+     */
+    public void patchMovementInput(Object movInput) {
+        if (movInput == null)
+            return;
+        Module nativeNoSlow = ModuleManager.INSTANCE.getModule("NoSlow");
+        if (nativeNoSlow != null && nativeNoSlow.isEnabled())
+            return;
+
+        for (LoadedScript ls : loaded.values()) {
+            if (!ls.module.isEnabled())
+                continue;
+            Float target = invokeScriptFloat(ls.module, ls.module.getClass(), "itemUseSlowTarget");
+            if (target == null || target < 0f)
+                continue;
+            if (Math.abs(target - VANILLA_ITEM_SLOW) < 0.001f)
+                continue;
+            float scale = target / VANILLA_ITEM_SLOW;
+            float forward = McAccess.getFloat(movInput, "field_78900_b");
+            float strafe = McAccess.getFloat(movInput, "field_78902_a");
+            McAccess.setFloat(movInput, "field_78900_b", forward * scale);
+            McAccess.setFloat(movInput, "field_78902_a", strafe * scale);
+            break;
+        }
+    }
+
     // ===================== reflective invocation =====================
 
     /** Invoke a generated no-arg method on the script wrapper itself. */
@@ -494,6 +525,38 @@ public final class ScriptManager {
      * Invoke a user-declared no-arg void method on the script instance.
      * Used for onLoad (called by ScriptManager at registration).
      */
+    private Float invokeScriptFloat(Module module, Class<?> clazz, String methodName) {
+        try {
+            java.lang.reflect.Method target = null;
+            for (java.lang.reflect.Method m : clazz.getDeclaredMethods()) {
+                if (m.getName().equals(methodName) && m.getParameterCount() == 0
+                        && (m.getReturnType() == float.class || m.getReturnType() == Float.class)) {
+                    target = m;
+                    break;
+                }
+            }
+            if (target == null)
+                return null;
+            target.setAccessible(true);
+            Object result = target.invoke(module);
+            if (result instanceof Float)
+                return (Float) result;
+            if (result instanceof Number)
+                return ((Number) result).floatValue();
+            return null;
+        } catch (Throwable t) {
+            Throwable cause = t;
+            if (t instanceof java.lang.reflect.InvocationTargetException
+                    && ((java.lang.reflect.InvocationTargetException) t).getCause() != null) {
+                cause = ((java.lang.reflect.InvocationTargetException) t).getCause();
+            }
+            GnuLog.log("JAVA_ script '" + module.getName() + "' " + methodName
+                    + " threw: " + cause.getClass().getSimpleName() + ": " + cause.getMessage());
+            try { module.setEnabled(false); } catch (Throwable ignored) {}
+            return null;
+        }
+    }
+
     private void invokeUserMethod(Module module, Class<?> clazz, String methodName, int startingLine) {
         try {
             java.lang.reflect.Method target = null;

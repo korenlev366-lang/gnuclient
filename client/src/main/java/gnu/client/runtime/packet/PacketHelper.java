@@ -311,14 +311,80 @@ public final class PacketHelper {
         return readVelocityMotionComponent(packet, "field_149414_d", "func_149269_i");
     }
 
+    public static void velocitySetMotionX(Object packet, int motionX) {
+        if (!isEntityVelocity(packet))
+            return;
+        McAccess.setInt(packet, "field_149415_b", motionX);
+    }
+
     public static void velocitySetMotionY(Object packet, int motionY) {
         if (!isEntityVelocity(packet))
             return;
         McAccess.setInt(packet, "field_149416_c", motionY);
     }
 
+    public static void velocitySetMotionZ(Object packet, int motionZ) {
+        if (!isEntityVelocity(packet))
+            return;
+        McAccess.setInt(packet, "field_149414_d", motionZ);
+    }
+
     public static boolean isSteerVehicle(Object packet) {
+        if (packet == null)
+            return false;
+        Class<?> c0c = McAccess.gameClass("net.minecraft.network.play.client.C0CPacketInput");
+        if (c0c != null && c0c.isInstance(packet))
+            return true;
         return classNameContains(packet, "C0CPacketInput");
+    }
+
+    /** C0C strafe speed (1.8.9 {@code C0CPacketInput}). */
+    public static float steerStrafe(Object packet) {
+        return readSteerFloat(packet, "field_149618_a", "func_149616_c", "getStrafeSpeed");
+    }
+
+    public static float steerForward(Object packet) {
+        return readSteerFloat(packet, "field_149617_b", "func_149614_d", "getForwardSpeed");
+    }
+
+    public static boolean steerJump(Object packet) {
+        return readSteerBoolean(packet, "field_149619_c", "func_149618_e", "isJumping");
+    }
+
+    public static void steerSetStrafe(Object packet, float strafe) {
+        if (!isSteerVehicle(packet))
+            return;
+        McAccess.setFloat(packet, "field_149618_a", strafe);
+    }
+
+    public static void steerSetForward(Object packet, float forward) {
+        if (!isSteerVehicle(packet))
+            return;
+        McAccess.setFloat(packet, "field_149617_b", forward);
+    }
+
+    public static void steerSetJump(Object packet, boolean jump) {
+        if (!isSteerVehicle(packet))
+            return;
+        McAccess.setBool(packet, "field_149619_c", jump);
+    }
+
+    private static float readSteerFloat(Object packet, String fieldSrg, String getterSrg, String namedGetter) {
+        Object fromGetter = McAccess.invoke(packet, getterSrg, new Class<?>[0]);
+        if (fromGetter == null)
+            fromGetter = McAccess.invokeNamed(packet, namedGetter, new Class<?>[0]);
+        if (fromGetter instanceof Float)
+            return (Float) fromGetter;
+        return McAccess.getFloat(packet, fieldSrg);
+    }
+
+    private static boolean readSteerBoolean(Object packet, String fieldSrg, String getterSrg, String namedGetter) {
+        Object fromGetter = McAccess.invoke(packet, getterSrg, new Class<?>[0]);
+        if (fromGetter == null)
+            fromGetter = McAccess.invokeNamed(packet, namedGetter, new Class<?>[0]);
+        if (fromGetter instanceof Boolean)
+            return (Boolean) fromGetter;
+        return McAccess.getBool(packet, fieldSrg);
     }
 
     private static int readVelocityMotionComponent(Object packet, String fieldSrg, String getterSrg) {

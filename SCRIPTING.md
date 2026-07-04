@@ -104,6 +104,7 @@ All optional (a script with none of these is legal but does nothing).
 | `onPreUpdate` | `void onPreUpdate()` | Once per tick at **ClientTick START** | Main tick logic |
 | `onPostUpdate` | `void onPostUpdate()` | Once per tick at **ClientTick END** (optional) | End-of-tick logic |
 | `onScriptDisable` | `void onScriptDisable()` | When the module is disabled | **Not** `onDisable` — that name collides with `Module`'s own override. Use `onScriptDisable`. |
+| `itemUseSlowTarget` | `float itemUseSlowTarget()` | Each tick at **MovementInput** update (before vanilla 0.2× item slow) | Return desired move multiplier (`1.0` = full speed, `0.2` = vanilla). Return `< 0` to skip. Used by `grim_noslow.java`. Skipped if native **NoSlow** module is enabled. |
 
 If any of these throws, the error is logged (`GnuLog`, visible in
 `/tmp/gnu_debug.log`) and the script's module is automatically disabled
@@ -214,7 +215,9 @@ void    setEntityPosition(Object entity, double x, double y, double z)
 void    setEntityVelocity(Object entity, double x, double y, double z)
 void    setEntityYaw(Object entity, float yaw)
 void    sendSteer(float strafe, float forward, boolean jump, boolean unmount)
-                                            // C0C steer — keep |strafe|, |forward| <= 0.98 (Grim VehicleA)
+void    releaseUseItem()                    // C07 RELEASE_USE_ITEM (Grim noslow)
+void    heldItemChangeFlicker()             // C09 slot flick (Grim noslow)
+void    setSprintKey(boolean pressed)
 ```
 
 > Note: `setRotation` does not affect FreeLook's camera path — FreeLook
@@ -349,6 +352,8 @@ boolean isSwingInProgress() / isSwingInProgress(Object player)
 Object  getHeldItemStack() / getHeldItemStack(Object player)
 boolean isHoldingSword()     // no entity overload
 boolean isHoldingBlock()     // no entity overload
+boolean isHoldingBow()
+boolean isHoldingConsumable()  // food, drink potion, milk — not splash
 
 boolean isInWater() / isInWater(Object entity)
 ```
@@ -392,15 +397,25 @@ reference first):
 
 ## Grim AC testing (1.8.9)
 
-On-foot fly **will flag** Grim Simulation. The working exemption is **vehicle fly**
-while mounted in a boat or minecart.
-
-Scripts (copy from `GNUClient/scripts/examples/`, reload after jar update):
+On-foot fly fights Grim Simulation. **`grim_fly.java`** buffers outbound C03 while you
+move client-side, then releases **one** position packet (not a burst), with optional txn
+delay and velocity inflate to widen the prediction window. Native **Grim Fly** (Player tab)
+is still the boat/vehicle path if you want that exemption.
 
 | Script | Purpose |
 |--------|---------|
-| `grim_fly.java` | Server-synced boat steer (cancel vanilla C0C + one/tick) |
-| `grim_disabler.java` | S12 boost only — **BlockSetback off** (causes BadPacketsN) |
+| `grim_fly.java` | On-foot blink fly + built-in disabler (txn delay, vel inflate) |
+| `grim_noslow.java` | Grim NoSlow — C07 release + slot flick (sword block); see below |
+| `grim_disabler.java` | Standalone velocity / txn helpers |
 
-Log results in `gnu client dev/Grim-bypass-log.md`. Requires a boat. Air fly is limited
-on 1.8.9 (server physics); water/ground hop works via jump steer.
+### grim_noslow.java
+
+**Grim mode** (default): each tick while using an item, calls `client.releaseUseItem()`
+and optional `client.heldItemChangeFlicker()`. **`itemUseSlowTarget()`** returns `1.0` so
+client movement stays full speed while blocking (Raven-style). Use for **sword block**; keep
+**Grim consumables** off unless you accept eat stutter.
+
+**Vanilla mode** (Grim mode off): **`itemUseSlowTarget()`** only — scales MovementInput via
+the script hook (Slow % slider). Do not scale `client.setMotion` in a loop (it compounds).
+
+Log results in `gnu client dev/Grim-bypass-log.md`.

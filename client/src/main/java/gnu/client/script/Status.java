@@ -105,6 +105,14 @@ public final class Status {
         return McAccess.isHoldingBlock();
     }
 
+    public boolean isHoldingBow() {
+        return McAccess.isHoldingBow();
+    }
+
+    public boolean isHoldingConsumable() {
+        return McAccess.isHoldingConsumable();
+    }
+
     public boolean isInWater() {
         return McAccess.isInWater();
     }

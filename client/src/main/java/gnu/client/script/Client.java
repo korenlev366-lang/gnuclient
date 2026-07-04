@@ -154,4 +154,18 @@ public final class Client {
     public void sendSteer(float strafe, float forward, boolean jump, boolean unmount) {
         McAccess.sendSteerVehicle(strafe, forward, jump, unmount);
     }
+
+    /** {@code C07 RELEASE_USE_ITEM} — clears Grim/server item-use slow (noslow Grim mode). */
+    public void releaseUseItem() {
+        McAccess.sendReleaseUseItem(getPlayer());
+    }
+
+    /** Raven-style {@code C09} slot flick (noslow Grim mode). */
+    public void heldItemChangeFlicker() {
+        McAccess.sendHeldItemChangeFlicker();
+    }
+
+    public void setSprintKey(boolean pressed) {
+        McAccess.setSprintKeyState(pressed);
+    }
 }

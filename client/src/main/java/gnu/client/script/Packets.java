@@ -54,6 +54,10 @@ public final class Packets {
                 || PacketHelper.isServerConfirmTransaction(packet);
     }
 
+    public boolean isClientTransaction(Object packet) {
+        return PacketHelper.isClientConfirmTransaction(packet);
+    }
+
     public boolean isVelocity(Object packet) {
         return PacketHelper.isEntityVelocity(packet);
     }
@@ -122,12 +126,44 @@ public final class Packets {
         PacketHelper.c03SetOnGround(packet, onGround);
     }
 
+    public void setVelocityMotionX(Object packet, int motionX) {
+        PacketHelper.velocitySetMotionX(packet, motionX);
+    }
+
     public void setVelocityMotionY(Object packet, int motionY) {
         PacketHelper.velocitySetMotionY(packet, motionY);
     }
 
+    public void setVelocityMotionZ(Object packet, int motionZ) {
+        PacketHelper.velocitySetMotionZ(packet, motionZ);
+    }
+
     public boolean isSteerVehicle(Object packet) {
         return PacketHelper.isSteerVehicle(packet);
+    }
+
+    public float steerStrafe(Object packet) {
+        return PacketHelper.steerStrafe(packet);
+    }
+
+    public float steerForward(Object packet) {
+        return PacketHelper.steerForward(packet);
+    }
+
+    public boolean steerJump(Object packet) {
+        return PacketHelper.steerJump(packet);
+    }
+
+    public void setSteerStrafe(Object packet, float strafe) {
+        PacketHelper.steerSetStrafe(packet, strafe);
+    }
+
+    public void setSteerForward(Object packet, float forward) {
+        PacketHelper.steerSetForward(packet, forward);
+    }
+
+    public void setSteerJump(Object packet, boolean jump) {
+        PacketHelper.steerSetJump(packet, jump);
     }
 
     public void sendReleased(Object packet) {

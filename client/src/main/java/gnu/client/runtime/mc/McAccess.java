@@ -1504,6 +1504,63 @@ public final class McAccess {
         return item != null && itemBlock != null && itemBlock.isInstance(item);
     }
 
+    public static boolean isHoldingBow() {
+        Object item = getHeldItem();
+        Class<?> bow = gameClass("net.minecraft.item.ItemBow");
+        return item != null && bow != null && bow.isInstance(item);
+    }
+
+    /** Food, drinkable potions, milk — not splash. */
+    public static boolean isHoldingConsumable() {
+        Object item = getHeldItem();
+        if (item == null)
+            return false;
+        Class<?> food = gameClass("net.minecraft.item.ItemFood");
+        if (food != null && food.isInstance(item))
+            return true;
+        Class<?> potion = gameClass("net.minecraft.item.ItemPotion");
+        if (potion != null && potion.isInstance(item)) {
+            Object stack = getHeldItemStack();
+            if (stack == null)
+                return true;
+            Object damage = invoke(stack, "func_77960_j", new Class<?>[0]);
+            if (damage == null)
+                damage = invokeNamed(stack, "getMetadata", new Class<?>[0]);
+            if (damage instanceof Integer && (Integer) damage > 16384)
+                return false;
+            return true;
+        }
+        Class<?> milk = gameClass("net.minecraft.item.ItemBucketMilk");
+        return milk != null && milk.isInstance(item);
+    }
+
+    /** Raven Beta noslow — swap away and back to current hotbar slot. */
+    public static void sendHeldItemChangeFlicker() {
+        Object player = thePlayer();
+        if (player == null)
+            return;
+        int slot = getHotbarSlot(player);
+        if (slot < 0 || slot > 8)
+            return;
+        sendHeldItemChange((slot + 1) % 9);
+        sendHeldItemChange(slot);
+    }
+
+    public static void sendHeldItemChange(int slot) {
+        if (slot < 0 || slot > 8)
+            return;
+        try {
+            Object packet = newInstance(
+                    "net.minecraft.network.play.client.C09PacketHeldItemChange",
+                    new Class<?>[] { int.class },
+                    slot);
+            if (packet != null)
+                addToSendQueue(packet);
+        } catch (Throwable t) {
+            GnuLog.log("JAVA_ McAccess sendHeldItemChange error: " + t);
+        }
+    }
+
     public static boolean isInWater() {
         return isInWater(thePlayer());
     }
