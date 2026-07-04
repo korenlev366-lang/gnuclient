@@ -1594,6 +1594,24 @@ public final class McAccess {
 
     private static final java.util.Random SHARED_RANDOM = new java.util.Random();
 
+    public static void setRotation(float yaw, float pitch) {
+        Object player = thePlayer();
+        if (player == null)
+            return;
+        float clampedPitch = Math.max(-90.0f, Math.min(90.0f, pitch));
+        setFloat(player, "field_70177_z", yaw);
+        setFloat(player, "field_70125_A", clampedPitch);
+    }
+
+    public static void setMotion(double x, double y, double z) {
+        Object player = thePlayer();
+        if (player == null)
+            return;
+        setDouble(player, "field_70159_w", x);
+        setDouble(player, "field_70181_x", y);
+        setDouble(player, "field_70179_y", z);
+    }
+
     /**
      * Ray-cast from the local player's eyes at the given yaw/pitch, returning the
      * {@code MovingObjectPosition} (or null). Generalized from

@@ -40,4 +40,12 @@ public final class Client {
     public Object raycastBlock(double distance, float yaw, float pitch) {
         return McAccess.raycastBlocks(distance, yaw, pitch);
     }
+
+    public void setRotation(float yaw, float pitch) {
+        McAccess.setRotation(yaw, pitch);
+    }
+
+    public void setMotion(double x, double y, double z) {
+        McAccess.setMotion(x, y, z);
+    }
 }
