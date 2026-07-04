@@ -1589,4 +1589,120 @@ public final class McAccess {
             GnuLog.log("JAVA_ McAccess setSneakInput error: " + t);
         }
     }
+
+    // ===================== script-facing helpers (raven-bS style accessors) =====================
+
+    private static final java.util.Random SHARED_RANDOM = new java.util.Random();
+
+    /**
+     * Ray-cast from the local player's eyes at the given yaw/pitch, returning the
+     * {@code MovingObjectPosition} (or null). Generalized from
+     * {@code BridgeAssistModule.rayCast}; mirrors its
+     * {@code World.rayTraceBlocks(start, end, false, false, false)} call
+     * (SRG {@code func_147447_a}) and {@code Vec3} construction. Uses
+     * {@code Math.sin/cos} rather than {@code MathHelper} to keep this file free
+     * of compile-time {@code net.minecraft.*} references (see file header).
+     */
+    public static Object raycastBlocks(double distance, float yaw, float pitch) {
+        Object player = thePlayer();
+        if (player == null)
+            return null;
+        Object world = theWorld();
+        if (world == null)
+            return null;
+
+        double ex = entityPosX(player);
+        double ey = entityPosY(player);
+        double ez = entityPosZ(player);
+        Object eh = invoke(player, "func_70047_e", new Class<?>[0]);
+        if (eh instanceof Float)
+            ey += (Float) eh;
+        else
+            ey += 1.62;
+
+        float yawRad = (float) Math.toRadians(yaw);
+        float pitchRad = (float) Math.toRadians(pitch);
+        float cosPitch = (float) Math.cos(pitchRad);
+        float dx = -(float) Math.sin(yawRad) * cosPitch;
+        float dy = -(float) Math.sin(pitchRad);
+        float dz = (float) Math.cos(yawRad) * cosPitch;
+
+        double endX = ex + dx * distance;
+        double endY = ey + dy * distance;
+        double endZ = ez + dz * distance;
+
+        Class<?> vec3Cls = gameClass("net.minecraft.util.Vec3");
+        if (vec3Cls == null)
+            return null;
+        Object startVec = newInstance("net.minecraft.util.Vec3",
+                new Class<?>[] { double.class, double.class, double.class }, ex, ey, ez);
+        Object endVec = newInstance("net.minecraft.util.Vec3",
+                new Class<?>[] { double.class, double.class, double.class }, endX, endY, endZ);
+        if (startVec == null || endVec == null)
+            return null;
+
+        return invoke(world, "func_147447_a",
+                new Class<?>[] { vec3Cls, vec3Cls, boolean.class, boolean.class, boolean.class },
+                startVec, endVec, false, false, false);
+    }
+
+    /**
+     * {@code InventoryPlayer.getStackInSlot(int)} — SRG {@code func_70301_a}.
+     *
+     * @param playerInventory the {@code InventoryPlayer} object (NOT the player —
+     *                        resolve it first via {@code getObject(player, "field_71071_by")})
+     */
+    public static Object getStackInSlot(Object playerInventory, int slot) {
+        if (playerInventory == null)
+            return null;
+        return invoke(playerInventory, "func_70301_a",
+                new Class<?>[] { int.class }, slot);
+    }
+
+    /**
+     * Current hotbar slot index — {@code InventoryPlayer.currentItem}
+     * (SRG {@code field_70961_c}). Resolves the player's inventory via
+     * {@code EntityPlayer.inventory} (SRG {@code field_71071_by}) first.
+     * Returns {@code -1} if the player or inventory is null.
+     */
+    public static int getHotbarSlot(Object player) {
+        if (player == null)
+            return -1;
+        Object inv = getObject(player, "field_71071_by");
+        if (inv == null)
+            return -1;
+        return getInt(inv, "field_70961_c");
+    }
+
+    /**
+     * {@code World.getBlockState(BlockPos)} — SRG {@code func_180495_p}.
+     * Constructs the {@code BlockPos} the same way
+     * {@code BridgeAssistModule.createBlockPos/isAirBlock} do.
+     */
+    public static Object getBlockState(Object world, int x, int y, int z) {
+        if (world == null)
+            return null;
+        Object pos = newInstance("net.minecraft.util.BlockPos",
+                new Class<?>[] { int.class, int.class, int.class }, x, y, z);
+        if (pos == null)
+            return null;
+        Class<?> blockPosCls = gameClass("net.minecraft.util.BlockPos");
+        if (blockPosCls == null)
+            return null;
+        return invoke(world, "func_180495_p", new Class<?>[] { blockPosCls }, pos);
+    }
+
+    /** Inclusive random int in {@code [min, max]} using the shared {@link #SHARED_RANDOM}. */
+    public static int randomInt(int min, int max) {
+        if (max < min)
+            return min;
+        return min + SHARED_RANDOM.nextInt(max - min + 1);
+    }
+
+    /** Random double in {@code [min, max)} using the shared {@link #SHARED_RANDOM}. */
+    public static double randomDouble(double min, double max) {
+        if (max < min)
+            return min;
+        return min + SHARED_RANDOM.nextDouble() * (max - min);
+    }
 }
