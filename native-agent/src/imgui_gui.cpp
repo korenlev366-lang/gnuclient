@@ -953,6 +953,11 @@ void draw() {
     ImVec2 p0 = ImGui::GetWindowPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float TOP_H = 32.0f, BOT_H = 52.0f, LEFT_W = 160.0f;
+    const float panel_x = p0.x + LEFT_W;
+    const float panel_y = p0.y + TOP_H;
+    const float panel_w = aW - LEFT_W;
+    const float panel_h = aH - TOP_H - BOT_H;
+    const float scripts_toolbar_h = (g_tab == 5) ? 42.0f : 0.0f;
     const float slide_x = lerp_f(20.f, 0.f, g_tab_anim);
     const float list_alpha = g_tab_anim;
     const float card_offset = lerp_f(18.f, 0.f, g_card_anim);
@@ -976,6 +981,19 @@ void draw() {
             g_accent = a;
             apply_style();
         }
+    }
+
+    if (g_tab == 5) {
+        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, list_alpha * ma);
+        ImGui::SetCursorScreenPos(ImVec2(panel_x + 18.0f, panel_y + 12.0f));
+        if (ImGui::Button("Reload Scripts", ImVec2(126.0f, 22.0f))) {
+            b.reload_scripts(env);
+            g_meta_built = false;
+            g_selected = -1;
+            g_toggle_anim.clear();
+            build_meta(env);
+        }
+        ImGui::PopStyleVar();
     }
 
     // ---- Left panel: scrollable module list ----
@@ -1061,16 +1079,12 @@ void draw() {
     if (g_selected >= 0 && g_selected < static_cast<int>(g_meta.size())) {
         const ModuleMeta& m = g_meta[g_selected];
         const int total = static_cast<int>(m.settings.size());
-        const float panel_x = p0.x + LEFT_W;
-        const float panel_y = p0.y + TOP_H;
-        const float panel_w = aW - LEFT_W;
-        const float panel_h = aH - TOP_H - BOT_H;
 
-        ImGui::SetCursorScreenPos(ImVec2(panel_x, panel_y));
+        ImGui::SetCursorScreenPos(ImVec2(panel_x, panel_y + scripts_toolbar_h));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, card_alpha * ma);
         const ImGuiWindowFlags settings_flags = ImGuiWindowFlags_AlwaysVerticalScrollbar;
-        if (ImGui::BeginChild("##settings_scroll", ImVec2(panel_w, panel_h), false, settings_flags)) {
+        if (ImGui::BeginChild("##settings_scroll", ImVec2(panel_w, panel_h - scripts_toolbar_h), false, settings_flags)) {
             const float pad_x = 18.0f + card_offset;
             const float card_w = panel_w - pad_x - 24.0f;
             ImVec2 card_pos(ImGui::GetWindowPos().x + pad_x, ImGui::GetCursorScreenPos().y + 14.0f);

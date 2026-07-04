@@ -38,6 +38,7 @@ import gnu.client.module.setting.Setting;
 import gnu.client.module.setting.SliderSetting;
 import gnu.client.runtime.mc.ClientProfile;
 import gnu.client.runtime.mc.McAccess;
+import gnu.client.script.ScriptManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -239,9 +240,6 @@ public final class NativeBootstrap {
             }
             ConfigManager.setLoading(false);
 
-            GUI_MODULES.clear();
-            GUI_MODULES.addAll(mgr.all());
-
             if (McAccess.profile().usesForgeEvents()) {
                 eventListener = new ClientEventListener();
                 registerForgeEventBus(eventListener);
@@ -250,6 +248,10 @@ public final class NativeBootstrap {
             }
 
             ConfigManager.INSTANCE.load();
+            // reloadAll() registers script modules into ModuleManager and calls
+            // refreshGuiModules() at its end, so GUI_MODULES is populated with
+            // built-ins + scripts before we log JAVA_READY below.
+            gnu.client.script.ScriptManager.instance().reloadAll();
             McAccess.resetTimer();
 
             initialized = true;
@@ -341,6 +343,27 @@ public final class NativeBootstrap {
 
     public static int guiModuleCount() {
         return GUI_MODULES.size();
+    }
+
+    /**
+     * Re-snapshot {@link ModuleManager#all()} into {@link #GUI_MODULES} so the
+     * native GUI and the {@code JAVA_READY} count reflect modules registered
+     * after {@link #init()} — notably script modules added by
+     * {@code ScriptManager.reloadAll()} (initial boot and RShift+R reloads).
+     * Called by {@code ScriptManager.reloadAll()} at the end of every reload.
+     */
+    public static void refreshGuiModules() {
+        GUI_MODULES.clear();
+        GUI_MODULES.addAll(ModuleManager.INSTANCE.all());
+    }
+
+    public static void reloadScriptsFromGui() {
+        GnuLog.log("GUI_ scripts: reload triggered from ClickGUI");
+        try {
+            ScriptManager.instance().reloadAll();
+        } catch (Throwable t) {
+            GnuLog.log("GUI_ scripts: reload from ClickGUI failed: " + t);
+        }
     }
 
     public static String guiModuleName(int i) {

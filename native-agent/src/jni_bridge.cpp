@@ -303,6 +303,7 @@ bool JniBridge::load_native_bootstrap(JNIEnv* env) {
     mid_init_render_ = sm("initOnRenderThread", "()Z");
     mid_tick_ = sm("tick", "()V");
     mid_render_ = sm("render", "()V");
+    mid_reload_scripts_ = sm("reloadScriptsFromGui", "()V");
 
     mid_mod_count_ = sm("guiModuleCount", "()I");
     mid_mod_name_ = sm("guiModuleName", "(I)Ljava/lang/String;");
@@ -369,6 +370,12 @@ void JniBridge::call_tick(JNIEnv* env) {
 void JniBridge::call_render(JNIEnv* env) {
     if (!bootstrapped_ || !mid_render_) return;
     env->CallStaticVoidMethod(cls_, mid_render_);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+}
+
+void JniBridge::reload_scripts(JNIEnv* env) {
+    if (!bootstrapped_ || !mid_reload_scripts_) return;
+    env->CallStaticVoidMethod(cls_, mid_reload_scripts_);
     if (env->ExceptionCheck()) env->ExceptionClear();
 }
 

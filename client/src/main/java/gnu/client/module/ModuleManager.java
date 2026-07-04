@@ -31,6 +31,14 @@ public final class ModuleManager {
         modules.put(module.getName(), module);
     }
 
+    /** Remove a module by name, disabling it first if it was enabled. */
+    public void unregister(String name) {
+        Module m = modules.remove(name);
+        if (m != null && m.isEnabled()) {
+            try { m.setEnabled(false); } catch (Throwable ignored) {}
+        }
+    }
+
     public void init() {
         if (initialized)
             return;

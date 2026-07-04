@@ -4,6 +4,7 @@ import gnu.client.common.GnuLog;
 import gnu.client.config.ConfigManager;
 import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
+import gnu.client.runtime.NativeBootstrap;
 import gnu.client.runtime.mc.McAccess;
 
 import javax.tools.Diagnostic;
@@ -157,6 +158,17 @@ public final class ScriptManager {
             ConfigManager.INSTANCE.load();
         } catch (Throwable t) {
             GnuLog.log("JAVA_ post-script ConfigManager.load failed: " + t);
+        }
+
+        // 5. Refresh NativeBootstrap.GUI_MODULES so the native GUI and JAVA_READY
+        //    count include the just-registered script modules. Covers both the
+        //    initial boot load (called from NativeBootstrap.init()) and RShift+R
+        //    reloads — without this, script modules are live in ModuleManager
+        //    but invisible to the GUI.
+        try {
+            NativeBootstrap.refreshGuiModules();
+        } catch (Throwable t) {
+            GnuLog.log("JAVA_ refreshGuiModules failed: " + t);
         }
     }
 

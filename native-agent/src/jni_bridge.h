@@ -39,6 +39,7 @@ public:
 
     void call_tick(JNIEnv* env);
     void call_render(JNIEnv* env);
+    void reload_scripts(JNIEnv* env);
 
     bool bootstrapped() const { return bootstrapped_; }
     static std::string resolve_sibling_jar();
@@ -95,6 +96,7 @@ private:
     jmethodID mid_init_render_ = nullptr;
     jmethodID mid_tick_ = nullptr;
     jmethodID mid_render_ = nullptr;
+    jmethodID mid_reload_scripts_ = nullptr;
 
     jmethodID mid_mod_count_ = nullptr;
     jmethodID mid_mod_name_ = nullptr;
