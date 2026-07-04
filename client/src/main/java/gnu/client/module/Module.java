@@ -103,6 +103,17 @@ public abstract class Module {
         return setting;
     }
 
+    /**
+     * Public entry point for runtime-loaded script modules to register settings
+     * from outside this package (where {@link #addSetting} is not visible).
+     * Hand-written modules should keep using {@link #addSetting} directly.
+     *
+     * @return the setting, for fluent chaining
+     */
+    public <T extends Setting<?>> T addScriptSetting(T setting) {
+        return addSetting(setting);
+    }
+
     public JsonObject serialize() {
         JsonObject root = new JsonObject();
         root.addProperty("enabled", enabled);
