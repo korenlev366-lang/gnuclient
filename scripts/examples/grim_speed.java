@@ -1,3 +1,5 @@
+// DISCLAIMER: Does NOT bypass Grim. Bad experimental attempt — see scripts/examples/README.md.
+//
 // Grim Speed — 8+ bps on Grim 1.8.9 (script, not a native module).
 //
 // Mode 0 Grim Strafe (DEFAULT): sprint + landing jump + alternating air strafe.

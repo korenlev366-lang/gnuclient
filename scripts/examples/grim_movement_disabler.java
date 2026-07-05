@@ -1,3 +1,5 @@
+// DISCLAIMER: Does NOT bypass Grim. Bad experimental attempt — see scripts/examples/README.md.
+//
 // Grim Movement Disabler — keeps Grim movement checks quiet so grim_speed can run.
 //
 // Does NOT speed you up by itself. It:
