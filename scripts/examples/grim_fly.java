@@ -1,3 +1,5 @@
+// DISCLAIMER: Does NOT bypass Grim. Bad experimental attempt — see scripts/examples/README.md.
+//
 // Grim Fly — abuses real Grim 1.8.9 gaps, not generic blink garbage.
 //
 // Mode 0 Vehicle: Simulation SKIPPED while mounted on 1.8.9 (boat/horse/pig/minecart).

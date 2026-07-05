@@ -1,3 +1,5 @@
+// DISCLAIMER: Does NOT bypass Grim. Bad experimental attempt — see scripts/examples/README.md.
+//
 // Grim Speed — on-foot movement for Grim 1.8.9 (vanilla physics; Grim simulates foot movement).
 //
 // Grim runs full Simulation on foot. Packet nudges / timer / setback lenience flag or are patched.

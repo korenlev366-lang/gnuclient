@@ -1,3 +1,5 @@
+// DISCLAIMER: Does NOT bypass Grim. Bad experimental attempt — see scripts/examples/README.md.
+//
 // Grim NoSlow — sword block + consumables (1.8.9).
 // Copy to ~/.config/gnuclient/scripts/ and Reload Scripts.
 //

@@ -1,3 +1,5 @@
+// DISCLAIMER: Does NOT bypass Grim. Bad experimental attempt — see scripts/examples/README.md.
+//
 // Grim Velocity — knockback reduction for Grim 1.8.9.
 //
 // Grim tracks S12 in transaction sandwiches (AntiKB). Cancel/zero/inflate S12 → AntiKB.
