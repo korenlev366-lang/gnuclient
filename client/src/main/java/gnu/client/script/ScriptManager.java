@@ -296,7 +296,7 @@ public final class ScriptManager {
         sb.append("import gnu.client.runtime.packet.PacketEvents;\n"); line++;
         sb.append("import gnu.client.runtime.packet.PacketListener;\n"); line++;
         sb.append("import gnu.client.script.Client;\n"); line++;
-        sb.append("import gnu.client.script.GrimState;\n"); line++;
+        sb.append("import gnu.client.script.LenienceState;\n"); line++;
         sb.append("import gnu.client.script.Inventory;\n"); line++;
         sb.append("import gnu.client.script.Keybinds;\n"); line++;
         sb.append("import gnu.client.script.Modules;\n"); line++;
@@ -315,7 +315,7 @@ public final class ScriptManager {
         sb.append("\n"); line++;
         sb.append("    public static final String scriptName = \"").append(safeName).append("\";\n"); line++;
         sb.append("    public static final Client client = Client.INSTANCE;\n"); line++;
-        sb.append("    public static final GrimState grim = GrimState.INSTANCE;\n"); line++;
+        sb.append("    public static final LenienceState lenience = LenienceState.INSTANCE;\n"); line++;
         sb.append("    public static final World world = World.INSTANCE;\n"); line++;
         sb.append("    public static final Keybinds keybinds = Keybinds.INSTANCE;\n"); line++;
         sb.append("    public static final Inventory inventory = Inventory.INSTANCE;\n"); line++;
@@ -349,7 +349,7 @@ public final class ScriptManager {
         sb.append("\n"); line++;
 
         // onTickStart — onPreUpdate once per tick (START). Do NOT also call from onTick:
-        // vehicle scripts + vanilla both send C0C steer; doubling triggers Grim VehicleTimer.
+        // vehicle scripts + vanilla both send C0C steer; doubling can trigger vehicle timer flags.
         sb.append("    @Override\n"); line++;
         sb.append("    public void onTickStart() {\n"); line++;
         sb.append("        invokeScript(\"onPreUpdate\");\n"); line++;
@@ -496,6 +496,12 @@ public final class ScriptManager {
             McAccess.setFloat(movInput, "field_78902_a", strafe * scale);
             break;
         }
+
+        for (LoadedScript ls : loaded.values()) {
+            if (!ls.module.isEnabled())
+                continue;
+            invokeScriptVoidOneArg(ls.module, ls.module.getClass(), "patchMovementInput", movInput);
+        }
     }
 
     // ===================== reflective invocation =====================
@@ -553,6 +559,32 @@ public final class ScriptManager {
                     + " threw: " + cause.getClass().getSimpleName() + ": " + cause.getMessage());
             try { module.setEnabled(false); } catch (Throwable ignored) {}
             return null;
+        }
+    }
+
+    private void invokeScriptVoidOneArg(Module module, Class<?> clazz, String methodName, Object arg) {
+        try {
+            java.lang.reflect.Method target = null;
+            for (java.lang.reflect.Method m : clazz.getDeclaredMethods()) {
+                if (m.getName().equals(methodName) && m.getParameterCount() == 1
+                        && m.getReturnType() == void.class) {
+                    target = m;
+                    break;
+                }
+            }
+            if (target == null)
+                return;
+            target.setAccessible(true);
+            target.invoke(module, arg);
+        } catch (Throwable t) {
+            Throwable cause = t;
+            if (t instanceof java.lang.reflect.InvocationTargetException
+                    && ((java.lang.reflect.InvocationTargetException) t).getCause() != null) {
+                cause = ((java.lang.reflect.InvocationTargetException) t).getCause();
+            }
+            GnuLog.log("JAVA_ script '" + module.getName() + "' " + methodName
+                    + " threw: " + cause.getClass().getSimpleName() + ": " + cause.getMessage());
+            try { module.setEnabled(false); } catch (Throwable ignored) {}
         }
     }
 

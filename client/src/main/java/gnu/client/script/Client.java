@@ -150,17 +150,17 @@ public final class Client {
         McAccess.setEntityYaw(entity, yaw);
     }
 
-    /** Boat/horse input packet — keep forward/sideways under 0.98 for Grim VehicleA. */
+    /** {@code C0C} steer packet for mounted vehicles (boat/horse/pig/minecart). */
     public void sendSteer(float strafe, float forward, boolean jump, boolean unmount) {
         McAccess.sendSteerVehicle(strafe, forward, jump, unmount);
     }
 
-    /** {@code C07 RELEASE_USE_ITEM} — clears Grim/server item-use slow (noslow Grim mode). */
+    /** {@code C07 RELEASE_USE_ITEM} — clears server item-use slow while eating/blocking. */
     public void releaseUseItem() {
         McAccess.sendReleaseUseItem(getPlayer());
     }
 
-    /** Raven-style {@code C09} slot flick (noslow Grim mode). */
+    /** {@code C09} hotbar slot flick (brief slot swap to reset use state). */
     public void heldItemChangeFlicker() {
         McAccess.sendHeldItemChangeFlicker();
     }
@@ -185,6 +185,16 @@ public final class Client {
         McAccess.setRightKeyState(pressed);
     }
 
+    /** Override {@code MovementInput} after vanilla key read (script {@code patchMovementInput} hook). */
+    public void setMovementInput(Object movInput, float moveForward, float moveStrafe, boolean jump) {
+        McAccess.setMovementInput(movInput, moveForward, moveStrafe, jump);
+    }
+
+    /** {@code EntityLivingBase.setSprinting} — pairs with forward movement for bhop speed. */
+    public void setSprinting(boolean sprinting) {
+        McAccess.setClientSprinting(getPlayer(), sprinting);
+    }
+
     /** Force local onGround after setback snap (pairs with C03 ground sync). */
     public void setOnGround(boolean onGround) {
         McAccess.setOnGround(getPlayer(), onGround);
@@ -193,5 +203,25 @@ public final class Client {
     /** Teleport local player to world coords (micro-step / blink fly). */
     public void setPlayerPosition(double x, double y, double z) {
         McAccess.setEntityPosition(getPlayer(), x, y, z);
+    }
+
+    /** Packet sprint state the server last ack'd ({@code serverSprintState}). */
+    public boolean isServerSprinting() {
+        return McAccess.getServerSprintState();
+    }
+
+    /** {@code C0B START_SPRINTING} when server thinks we are not sprinting. */
+    public void sendSprintStart() {
+        McAccess.sendSprintActionPacket(getPlayer(), true);
+    }
+
+    /** {@code C0B STOP_SPRINTING} when server thinks we are sprinting. */
+    public void sendSprintStop() {
+        McAccess.sendSprintActionPacket(getPlayer(), false);
+    }
+
+    /** {@code PlayerControllerMP.attackEntity} — real C02 to server. */
+    public boolean attackEntity(Object entity) {
+        return McAccess.attackEntity(entity);
     }
 }

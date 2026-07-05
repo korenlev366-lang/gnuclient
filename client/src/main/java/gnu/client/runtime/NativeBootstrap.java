@@ -1,5 +1,6 @@
 package gnu.client.runtime;
 
+import gnu.client.command.ChatCommandHandler;
 import gnu.client.common.GnuLog;
 import gnu.client.config.ConfigManager;
 import gnu.client.module.Category;
@@ -32,6 +33,7 @@ import gnu.client.module.modules.visual.HudModule;
 import gnu.client.module.modules.visual.NameTagsModule;
 import gnu.client.module.modules.visual.TracersModule;
 import gnu.client.module.modules.visual.FreeLookModule;
+import gnu.client.module.modules.settings.ClickGuiModule;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.Setting;
@@ -107,6 +109,11 @@ public final class NativeBootstrap {
             ModuleManager mgr = ModuleManager.INSTANCE;
             mgr.reset();
             mgr.init();
+            try {
+                mgr.register(new ClickGuiModule());
+            } catch (Exception e) {
+                GnuLog.log("MODULE FAIL ClickGuiModule: " + e);
+            }
             try {
                 mgr.register(new WTapModule());
             } catch (Exception e) {
@@ -252,6 +259,7 @@ public final class NativeBootstrap {
             // refreshGuiModules() at its end, so GUI_MODULES is populated with
             // built-ins + scripts before we log JAVA_READY below.
             gnu.client.script.ScriptManager.instance().reloadAll();
+            ChatCommandHandler.register();
             McAccess.resetTimer();
 
             initialized = true;
@@ -328,6 +336,27 @@ public final class NativeBootstrap {
     /** Milliseconds since last physical mouse movement, or a large value if none. */
     public static native long lastMouseMoveAgeMs();
 
+    /** Toggle native ImGui menu open/closed (ClickGUI keybind). */
+    public static native void toggleMenuNative();
+
+    /** Set native ImGui menu open state. */
+    public static native void setMenuOpenNative(boolean open);
+
+    /** Whether the native ImGui menu is open. */
+    public static native boolean isMenuOpenNative();
+
+    public static void toggleMenu() {
+        toggleMenuNative();
+    }
+
+    public static void setMenuOpen(boolean open) {
+        setMenuOpenNative(open);
+    }
+
+    public static boolean isMenuOpen() {
+        return isMenuOpenNative();
+    }
+
     private static Setting<?> setting(int i, int s) {
         Module m = module(i);
         if (m == null)
@@ -386,9 +415,19 @@ public final class NativeBootstrap {
         return m != null && m.isEnabled();
     }
 
+    /** True for bind-only modules (e.g. ClickGUI) — no Enable toggle in the GUI. */
+    public static boolean guiModuleBindOnly(int i) {
+        Module m = module(i);
+        return m != null && m.getKeybindAction() == gnu.client.module.KeybindAction.MENU;
+    }
+
     public static void guiToggle(int i) {
         Module m = module(i);
-        if (m != null)
+        if (m == null)
+            return;
+        if (m.getKeybindAction() == gnu.client.module.KeybindAction.MENU)
+            toggleMenu();
+        else
             m.toggle();
     }
 

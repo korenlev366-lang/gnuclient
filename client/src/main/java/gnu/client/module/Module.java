@@ -36,6 +36,11 @@ public abstract class Module {
         return category;
     }
 
+    /** {@link KeybindAction#TOGGLE} unless overridden (e.g. ClickGUI). */
+    public KeybindAction getKeybindAction() {
+        return KeybindAction.TOGGLE;
+    }
+
     public boolean isEnabled() {
         return enabled;
     }

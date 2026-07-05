@@ -734,6 +734,33 @@ public final class PacketHelper {
                 || classNameContains(packet, "S02PacketChatMessage");
     }
 
+    /** Outbound {@code C01PacketChatMessage} only. */
+    public static boolean isChatSend(Object packet) {
+        return classNameContains(packet, "C01PacketChatMessage");
+    }
+
+    /**
+     * Chat text from outbound {@code C01PacketChatMessage}.
+     * stable_22: {@code field_149440_a} message, {@code func_149439_c} getMessage.
+     */
+    public static String chatMessage(Object packet) {
+        if (!isChatSend(packet))
+            return null;
+        try {
+            Object fromGetter = McAccess.invoke(packet, "func_149439_c", new Class<?>[0]);
+            if (fromGetter instanceof String)
+                return (String) fromGetter;
+        } catch (Throwable ignored) {
+        }
+        try {
+            Object fromField = McAccess.getObject(packet, "field_149440_a");
+            if (fromField instanceof String)
+                return (String) fromField;
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
     private static boolean classNameContains(Object packet, String fragment) {
         return packet != null && packet.getClass().getName().contains(fragment);
     }

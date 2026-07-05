@@ -28,8 +28,7 @@
 #include <unordered_map>
 #include <vector>
 
-// Correction 3: INSERT toggle via libevdev evdev keycode, not LWJGL.
-static_assert(KEY_INSERT == 110, "evdev KEY_INSERT must be 110");
+// Menu toggle key is bound via ClickGuiModule (Java LWJGL poll). ESC still closes here.
 
 namespace gnu {
 namespace ImGuiGui {
@@ -363,10 +362,11 @@ bool square_toggle(const char* id, float x, float y, float sz, float on_t) {
 }
 
 // Height of a settings card for the given range (for the bg rect).
-float card_height(const ModuleMeta& m, int from, int to, bool enable_row) {
+// keybind_row: 0 = none, 1 = bind only, 2 = enable + bind
+float card_height(const ModuleMeta& m, int from, int to, int keybind_row) {
     float h = 14.0f;          // top pad
     h += 24.0f;               // header
-    if (enable_row) h += 30.0f;
+    if (keybind_row > 0) h += 30.0f;
     for (int s = from; s < to; ++s) {
         switch (m.settings[s].type) {
             case 0: h += 26.0f; break;
@@ -379,11 +379,11 @@ float card_height(const ModuleMeta& m, int from, int to, bool enable_row) {
 }
 
 void render_card(JNIEnv* env, JniBridge& b, int mod, ImVec2 pos, float w,
-                 const char* header, int from, int to, bool enable_row) {
+                 const char* header, int from, int to, int keybind_row) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ModuleMeta& m = g_meta[mod];
     const float pad = 14.0f;
-    float h = card_height(m, from, to, enable_row);
+    float h = card_height(m, from, to, keybind_row);
 
     dl->AddRectFilled(pos, ImVec2(pos.x + w, pos.y + h), U(CARD_BG), 6.0f);
 
@@ -395,18 +395,29 @@ void render_card(JNIEnv* env, JniBridge& b, int mod, ImVec2 pos, float w,
     dl->AddText(g_font_bold, SZ_HEADER, ImVec2(x, y), U(TEXT_WHITE), header);
     y += 24.0f;
 
-    // Enable row (module on/off + "?" help)
-    if (enable_row) {
-        update_toggle_anim(env, b, mod);
-        const float on_t = g_toggle_anim[mod];
-        ImGui::PushID("enable");
-        if (square_toggle("##en", x, y, 14.0f, on_t))
-            b.gui_toggle(env, mod);
-        dl->AddText(g_font_bold, SZ_LABEL, ImVec2(x + 22.0f, y - 1.0f),
-                    U(TEXT_WHITE), "Enable");
+    const bool show_enable = (keybind_row == 2);
+    const bool show_bind = (keybind_row >= 1);
+
+    // Enable row (module on/off + keybind) or bind-only row (ClickGUI)
+    if (show_enable || show_bind) {
+        if (show_enable) {
+            update_toggle_anim(env, b, mod);
+            const float on_t = g_toggle_anim[mod];
+            ImGui::PushID("enable");
+            if (square_toggle("##en", x, y, 14.0f, on_t))
+                b.gui_toggle(env, mod);
+            dl->AddText(g_font_bold, SZ_LABEL, ImVec2(x + 22.0f, y - 1.0f),
+                        U(TEXT_WHITE), "Enable");
+            ImGui::PopID();
+        } else {
+            dl->AddText(g_font_bold, SZ_LABEL, ImVec2(x, y - 1.0f), U(TEXT_WHITE), "Keybind");
+        }
 
         {
-            const float kx = x + 22.0f + text_w(g_font_semibold, SZ_LABEL, "Enable") + 10.0f;
+            const float label_w = show_enable
+                ? text_w(g_font_semibold, SZ_LABEL, "Enable")
+                : text_w(g_font_semibold, SZ_LABEL, "Keybind");
+            const float kx = show_enable ? (x + 22.0f + label_w + 10.0f) : (x + label_w + 10.0f);
             const bool rebinding = b.gui_is_rebind_pending(env, mod);
             std::string key_name = b.gui_module_key_label(env, mod);
             char bind_buf[48];
@@ -424,18 +435,19 @@ void render_card(JNIEnv* env, JniBridge& b, int mod, ImVec2 pos, float w,
             ImGui::PopID();
         }
 
-        // "?" pill on the right
-        float qx = pos.x + w - pad - 22.0f;
-        ImGui::SetCursorScreenPos(ImVec2(qx, y - 2.0f));
-        ImGui::InvisibleButton("##help", ImVec2(20.0f, 18.0f));
-        dl->AddRectFilled(ImVec2(qx, y - 2.0f), ImVec2(qx + 20.0f, y + 16.0f),
-                          U(SELECTED_BG), 4.0f);
-        float qw = text_w(g_font_semibold, SZ_VALUE, "?");
-        dl->AddText(g_font_semibold, SZ_VALUE, ImVec2(qx + 10.0f - qw * 0.5f, y),
-                    U(TEXT_GRAY), "?");
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", m.desc.c_str());
-        ImGui::PopID();
+        if (show_enable) {
+            // "?" pill on the right
+            float qx = pos.x + w - pad - 22.0f;
+            ImGui::SetCursorScreenPos(ImVec2(qx, y - 2.0f));
+            ImGui::InvisibleButton("##help", ImVec2(20.0f, 18.0f));
+            dl->AddRectFilled(ImVec2(qx, y - 2.0f), ImVec2(qx + 20.0f, y + 16.0f),
+                              U(SELECTED_BG), 4.0f);
+            float qw = text_w(g_font_semibold, SZ_VALUE, "?");
+            dl->AddText(g_font_semibold, SZ_VALUE, ImVec2(qx + 10.0f - qw * 0.5f, y),
+                        U(TEXT_GRAY), "?");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", m.desc.c_str());
+        }
         y += 30.0f;
     }
 
@@ -799,12 +811,7 @@ void input_thread_main() {
             int rc;
             while ((rc = libevdev_next_event(devs[i], LIBEVDEV_READ_FLAG_NORMAL, &ev)) ==
                    LIBEVDEV_READ_STATUS_SUCCESS) {
-                if (ev.type == EV_KEY && ev.code == KEY_INSERT) {
-                    if (ev.value == 1) { // press edge
-                        bool now = !g_menu_open.load(std::memory_order_acquire);
-                        g_menu_open.store(now, std::memory_order_release);
-                    }
-                } else if (ev.type == EV_KEY && ev.code == KEY_ESC && ev.value == 1) {
+                if (ev.type == EV_KEY && ev.code == KEY_ESC && ev.value == 1) {
                     g_menu_open.store(false, std::memory_order_release);
                 } else if (ev.type == EV_KEY && ev.code == BTN_LEFT && selected_mouse[i]) {
                     std::lock_guard<std::mutex> g(g_input_mtx);
@@ -1029,7 +1036,8 @@ void draw() {
                     hover_row = i;
                 if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
                     g_selected = i;
-                if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right) &&
+                    !b.gui_module_bind_only(env, i))
                     b.gui_toggle(env, i);
 
                 const bool selected = (g_selected == i);
@@ -1088,8 +1096,9 @@ void draw() {
             const float pad_x = 18.0f + card_offset;
             const float card_w = panel_w - pad_x - 24.0f;
             ImVec2 card_pos(ImGui::GetWindowPos().x + pad_x, ImGui::GetCursorScreenPos().y + 14.0f);
-            render_card(env, b, g_selected, card_pos, card_w, m.name.c_str(), 0, total, true);
-            ImGui::Dummy(ImVec2(card_w, card_height(m, 0, total, true) + 28.0f));
+            const int keybind_row = b.gui_module_bind_only(env, g_selected) ? 1 : 2;
+            render_card(env, b, g_selected, card_pos, card_w, m.name.c_str(), 0, total, keybind_row);
+            ImGui::Dummy(ImVec2(card_w, card_height(m, 0, total, keybind_row) + 28.0f));
         }
         ImGui::EndChild();
         ImGui::PopStyleVar();
@@ -1259,6 +1268,15 @@ void start_input() {
 
 bool menu_open() {
     return g_menu_open.load(std::memory_order_acquire);
+}
+
+void toggle_menu() {
+    bool now = !g_menu_open.load(std::memory_order_acquire);
+    g_menu_open.store(now, std::memory_order_release);
+}
+
+void set_menu_open(bool open) {
+    g_menu_open.store(open, std::memory_order_release);
 }
 
 bool menu_visible() {

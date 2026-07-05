@@ -2,6 +2,7 @@ package gnu.client.module;
 
 import gnu.client.common.GnuLog;
 import gnu.client.module.modules.visual.NameTagsModule;
+import gnu.client.runtime.NativeBootstrap;
 
 import org.lwjgl.input.Keyboard;
 
@@ -131,6 +132,13 @@ public final class ModuleManager {
      * hotbar, inventory, and other vanilla key presses normally.
      * Debounce (120 ms) prevents key-repeat from double-toggling.
      */
+    private static void dispatchKeybind(Module module) {
+        if (module.getKeybindAction() == KeybindAction.MENU)
+            NativeBootstrap.toggleMenu();
+        else
+            module.toggle();
+    }
+
     private void pollAndDispatchEvents() {
         if (modules.isEmpty())
             return;
@@ -146,7 +154,7 @@ public final class ModuleManager {
                 if (down && !prev) {
                     Long last = lastToggleTime.get(module);
                     if (last == null || now - last > TOGGLE_DEBOUNCE_MS) {
-                        module.toggle();
+                        dispatchKeybind(module);
                         lastToggleTime.put(module, now);
                     }
                 }

@@ -1,23 +1,17 @@
 // DISCLAIMER: Does NOT bypass Grim. Bad experimental attempt — see scripts/examples/README.md.
 //
-// Grim Movement Disabler — keeps Grim movement checks quiet so grim_speed can run.
+// Grim Setback Sync — NOT a movement bypass.
 //
-// Does NOT speed you up by itself. It:
-//   • Accepts S08 setbacks (snap client + sync C03) — anti BadPacketsN / GroundSpoof
-//   • Publishes lenience windows to grim.* for grim_speed to ride (KB / explosion / setback)
+// Grim patched "reuse setback velocity to bypass movement checks". This script only:
+//   • Accepts S08 setbacks (snap client) — prevents BadPacketsN from ignored teleports
+//   • Syncs outgoing C03 to client pos + real onGround for a few ticks after S08
 //
-// Enable this BEFORE grim_speed. Never block/cancel S08.
+// It does NOT widen lenience, inflate KB, or reuse setback velocity. For fast travel on
+// Grim 1.8.9 use grim_fly vehicle mode (Simulation skipped while mounted).
 
 void onLoad() {
     modules.registerButton("Accept setbacks", true);
-    modules.registerSlider("Setback lock", 5f, 1f, 15f);
-    modules.registerButton("Force ground on setback", true);
-    modules.registerButton("Zero motion on setback", true);
-
-    modules.registerButton("Track KB window", true);
-    modules.registerSlider("KB window", 15f, 5f, 40f);
-    modules.registerButton("Track expl window", true);
-    modules.registerSlider("Expl window", 15f, 5f, 40f);
+    modules.registerSlider("Setback lock", 3f, 1f, 10f);
 }
 
 int packetSendPriority() {
@@ -36,14 +30,10 @@ void snapSetback(Object packet) {
     client.setPlayerPosition(x, y, z);
     if (!Float.isNaN(yaw) && !Float.isNaN(pitch))
         client.setRotation(yaw, pitch);
-    if (modules.getButton("Zero motion on setback"))
-        client.setMotion(0, 0, 0);
-    if (modules.getButton("Force ground on setback"))
-        client.setOnGround(true);
 
     int lock = (int) modules.getSlider("Setback lock");
     if (lock < 1) lock = 1;
-    grim.setSetbackTicks(lock);
+    lenience.setSetbackTicks(lock);
 }
 
 boolean onPacketReceive(Object packet) {
@@ -51,49 +41,26 @@ boolean onPacketReceive(Object packet) {
         snapSetback(packet);
         return false;
     }
-
-    if (modules.getButton("Track KB window") && packets.isSelfVelocity(packet)) {
-        int mx = packets.velocityMotionX(packet);
-        int mz = packets.velocityMotionZ(packet);
-        if (mx != 0 || mz != 0) {
-            int w = (int) modules.getSlider("KB window");
-            grim.bumpKbWindow(w);
-        }
-        return false;
-    }
-
-    if (modules.getButton("Track expl window") && packets.isExplosion(packet)) {
-        float mx = packets.explosionMotionX(packet);
-        float mz = packets.explosionMotionZ(packet);
-        if (mx != 0f || mz != 0f) {
-            int w = (int) modules.getSlider("Expl window");
-            grim.bumpExplWindow(w);
-        }
-        return false;
-    }
     return false;
 }
 
 boolean onPacketSend(Object packet) {
-    if (grim.getSetbackTicks() <= 0 || !packets.isMovement(packet))
+    if (lenience.getSetbackTicks() <= 0 || !packets.isMovement(packet))
         return false;
 
     if (packets.hasPosition(packet)) {
         packets.setMovementPosition(packet, client.getPosX(), client.getPosY(), client.getPosZ());
-        if (modules.getButton("Force ground on setback"))
-            packets.setMovementOnGround(packet, true);
-        else
-            packets.setMovementOnGround(packet, client.isOnGround());
-    } else if (modules.getButton("Force ground on setback")) {
-        packets.setMovementOnGround(packet, true);
+        packets.setMovementOnGround(packet, client.isOnGround());
+    } else {
+        packets.setMovementOnGround(packet, client.isOnGround());
     }
     return false;
 }
 
 void onPreUpdate() {
-    grim.decayTick();
+    lenience.decayTick();
 }
 
 void onScriptDisable() {
-    grim.reset();
+    lenience.reset();
 }

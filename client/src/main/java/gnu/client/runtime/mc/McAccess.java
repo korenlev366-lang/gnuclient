@@ -526,6 +526,65 @@ public final class McAccess {
         return filtered;
     }
 
+    public static boolean isEntityPlayer(Object entity) {
+        if (entity == null)
+            return false;
+        Class<?> playerCls = gameClass("net.minecraft.entity.player.EntityPlayer");
+        return playerCls != null && playerCls.isInstance(entity);
+    }
+
+    public static double distanceToPlayer(Object entity) {
+        Object player = thePlayer();
+        if (player == null || entity == null)
+            return Double.MAX_VALUE;
+        double dx = entityPosX(player) - entityPosX(entity);
+        double dy = entityPosY(player) - entityPosY(entity);
+        double dz = entityPosZ(player) - entityPosZ(entity);
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    /** Nearest other player within {@code range} blocks, or {@code null}. */
+    public static Object getNearestPlayer(double range) {
+        Object player = thePlayer();
+        Object world = theWorld();
+        if (player == null || world == null || range <= 0.0)
+            return null;
+
+        List<?> entities = getWorldEntitiesFiltered(world);
+        Object best = null;
+        double bestDist = range;
+        for (Object entity : entities) {
+            if (entity == null || entity == player || !isEntityPlayer(entity))
+                continue;
+            double dist = distanceToPlayer(entity);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = entity;
+            }
+        }
+        return best;
+    }
+
+    /** {@code PlayerControllerMP.attackEntity} — sends C02 ATTACK to server. */
+    public static boolean attackEntity(Object target) {
+        Object player = thePlayer();
+        Object controller = playerController();
+        if (player == null || controller == null || target == null)
+            return false;
+        try {
+            Class<?> playerCls = gameClass("net.minecraft.entity.player.EntityPlayer");
+            Class<?> entityCls = gameClass("net.minecraft.entity.Entity");
+            if (playerCls == null || entityCls == null)
+                return false;
+            invoke(controller, "func_78764_a", new Class<?>[] { playerCls, entityCls }, player, target);
+            invoke(player, "func_71038_i", new Class<?>[0]);
+            return true;
+        } catch (Throwable t) {
+            GnuLog.log("JAVA_ McAccess attackEntity error: " + t);
+            return false;
+        }
+    }
+
     /** Read all player names currently in the tab list (playerInfoMap -> GameProfile -> name). */
     @SuppressWarnings("unchecked")
     public static Set<String> getTablistNames() {
@@ -1175,6 +1234,18 @@ public final class McAccess {
         } catch (Throwable t) {
             GnuLog.log("JAVA_ McAccess setJumpInput error: " + t);
         }
+    }
+
+    /**
+     * Write {@code MovementInput} after vanilla {@code updatePlayerMoveState}.
+     * SRG: moveForward=field_78900_b, moveStrafe=field_78902_a, jump=field_78901_c.
+     */
+    public static void setMovementInput(Object movInput, float moveForward, float moveStrafe, boolean jump) {
+        if (movInput == null)
+            return;
+        setFloat(movInput, "field_78900_b", moveForward);
+        setFloat(movInput, "field_78902_a", moveStrafe);
+        setBool(movInput, "field_78901_c", jump);
     }
 
     /** Press/release back keybind. keyBindBack=field_74368_y (CSV stable_22). */

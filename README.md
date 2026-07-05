@@ -13,4 +13,4 @@ Ghost client for Minecraft 1.8.9 Forge
 ## Running it
 1. clone this repostiry and cd into /build and run make gnu-all.
 2. Launch Minecraft 1.8.9 Forge as normal, then ./install/bin/gnu-inject  . 
-3. In-game, press **INSERT** to open the ClickGUI menu. **ESC** or INSERT again to close the ClickGUI.
+3. In-game, press your **ClickGUI** bind (default **INSERT**) to open the menu. **ESC** or the bind again closes it. Rebind under the **Settings** tab, or in chat: `.bind clickgui RSHIFT` (see `/tmp/gnu_debug.log` for confirmation — the command is not sent to the server).
