@@ -78,6 +78,7 @@ package gnu.client.script.generated;
 public final class sc_RenamedScript_a1b2c ends Module implements PacketListener {
     public static final String scriptName = "RenamedScript";
     public static final Client client = Client.INSTANCE;
+    public static final LenienceState lenience = LenienceState.INSTANCE;
     public static final World world = World.INSTANCE;
     public static final Keybinds keybinds = Keybinds.INSTANCE;
     public static final Inventory inventory = Inventory.INSTANCE;
@@ -104,6 +105,7 @@ All optional (a script with none of these is legal but does nothing).
 | `onPreUpdate` | `void onPreUpdate()` | Once per tick at **ClientTick START** | Main tick logic |
 | `onPostUpdate` | `void onPostUpdate()` | Once per tick at **ClientTick END** (optional) | End-of-tick logic |
 | `onScriptDisable` | `void onScriptDisable()` | When the module is disabled | **Not** `onDisable` — that name collides with `Module`'s own override. Use `onScriptDisable`. |
+| `patchMovementInput` | `void patchMovementInput(Object movInput)` | Each tick when vanilla reads movement keys | Override strafe/forward/jump via `client.setMovementInput` |
 | `itemUseSlowTarget` | `float itemUseSlowTarget()` | Each tick at **MovementInput** update (before vanilla 0.2× item slow) | Return desired move multiplier (`1.0` = full speed, `0.2` = vanilla). Return `< 0` to skip. Used by `grim_noslow.java`. |
 
 If any of these throws, the error is logged (`GnuLog`, visible in
@@ -215,9 +217,23 @@ void    setEntityPosition(Object entity, double x, double y, double z)
 void    setEntityVelocity(Object entity, double x, double y, double z)
 void    setEntityYaw(Object entity, float yaw)
 void    sendSteer(float strafe, float forward, boolean jump, boolean unmount)
-void    releaseUseItem()                    // C07 RELEASE_USE_ITEM (Grim noslow)
-void    heldItemChangeFlicker()             // C09 slot flick (Grim noslow)
+                                            // C0C steer packet for mounted vehicles
+void    releaseUseItem()                    // C07 RELEASE_USE_ITEM (clears item-use slow)
+void    heldItemChangeFlicker()             // C09 hotbar slot flick (reset use state)
 void    setSprintKey(boolean pressed)
+void    setForwardKey(boolean pressed)
+void    setBackKey(boolean pressed)
+void    setLeftKey(boolean pressed)
+void    setRightKey(boolean pressed)
+void    setMovementInput(Object movInput, float moveForward, float moveStrafe, boolean jump)
+                                            // patch MovementInput after vanilla key read
+void    setSprinting(boolean sprinting)     // EntityLivingBase.setSprinting
+void    setOnGround(boolean onGround)       // local onGround after setback snap
+void    setPlayerPosition(double x, double y, double z)
+boolean isServerSprinting()                 // server-acknowledged sprint state
+void    sendSprintStart()                   // C0B START_SPRINTING
+void    sendSprintStop()                    // C0B STOP_SPRINTING
+boolean attackEntity(Object entity)         // PlayerControllerMP.attackEntity (real C02)
 ```
 
 > Note: `setRotation` does not affect FreeLook's camera path — FreeLook
@@ -333,6 +349,16 @@ void    setExplosionMotionZ(Object packet, float motionZ)
 void    setMovementRotation(Object packet, float yaw, float pitch)
                                             // rewrites yaw/pitch on a C03 packet in place
                                             // (no-op if the packet isn't a movement packet)
+void    setMovementPosition(Object packet, double x, double y, double z)
+void    setMovementOnGround(Object packet, boolean onGround)
+
+boolean isSteerVehicle(Object packet)
+float   steerStrafe(Object packet)
+float   steerForward(Object packet)
+boolean steerJump(Object packet)
+void    setSteerStrafe(Object packet, float strafe)
+void    setSteerForward(Object packet, float forward)
+void    setSteerJump(Object packet, boolean jump)
 
 void    sendReleased(Object packet)        // send a previously-cancelled packet (blink release)
 void    processInbound(Object packet)      // hand a packet to the vanilla NetworkManager
@@ -342,6 +368,27 @@ There is no generic field-mutation/reflection access to arbitrary packet
 fields — the surface above is intentionally narrow (matching what
 disablers and simple network modules actually need) rather than exposing
 raw packet internals to scripts.
+
+### `lenience` — setback / knockback window counters
+
+Thread-safe shared counters for scripts that coordinate setback snaps with
+outgoing C03 packets or track knockback/explosion lenience windows. Updated
+from `onPacketReceive` (Netty thread) and decayed from `onPreUpdate` (main
+thread). Call `lenience.decayTick()` once per tick and `lenience.reset()` on
+disable.
+
+```java
+boolean lenient()                  // any tracked window active
+boolean setbackLenient()           // setback lock only (safe for C03 sync)
+int     getSetbackTicks()
+int     getKbWindow()
+int     getExplWindow()
+void    setSetbackTicks(int ticks)
+void    bumpKbWindow(int ticks)
+void    bumpExplWindow(int ticks)
+void    decayTick()
+void    reset()
+```
 
 ### `status` — combat and entity state
 
@@ -385,12 +432,11 @@ reference first):
 ## Design notes for anyone extending this API
 
 - **Every accessor facade is a stateless singleton** (`Client.INSTANCE`,
-  `World.INSTANCE`, etc.) except `Modules`, which is constructed per
-  script because it needs a reference to its owning `Module`. If you add
-  a new facade, do not cache game objects (player/world/entity
-  references) as fields — resolve through `McAccess` fresh on every call.
-  A cached reference pins that generated script's classloader in memory
-  even after the script is reloaded/removed.
+  `World.INSTANCE`, etc.) except `Modules` (per-script) and `LenienceState`
+  (shared tick counters across scripts). If you add a new facade, do not cache
+  game objects (player/world/entity references) as fields — resolve through
+  `McAccess` fresh on every call. A cached reference pins that generated
+  script's classloader in memory even after the script is reloaded/removed.
 - New accessors should wrap an **existing** `McAccess`/`PacketHelper`/
   `PacketUtil` method wherever one already exists, rather than writing
   fresh reflection. If no such method exists, add it to `McAccess`
@@ -411,67 +457,76 @@ reference first):
   so it's never on the system classpath property). See
   `ScriptManager.ourJarPath()`.
 
-## Grim AC testing (1.8.9)
+## Example scripts (`scripts/examples/`)
 
-On-foot fly fights Grim Simulation unless you abuse a real exemption. **`grim_fly.java`**
-modes (slider 0–3):
-
-| Mode | What it abuses |
-|------|----------------|
-| 0 Vehicle | 1.8.9 `wasChecked=false` while mounted — Simulation skipped (boat/horse/pig/minecart) |
-| 1 Micro | Grim 0.03 point-three position steps — slow creep, packet-synced |
-| 2 Knockback | Inflate inbound S12 — ride KB/explosion lenience window |
-| 3 Blink | Hold C03 + C0F, move client-side, release last packet only |
-
-**Auto vehicle** uses mode 0 whenever you're riding.
+Shipped examples for movement, fly, velocity, noslow, and setback sync.
+Copy any file to `~/.config/gnuclient/scripts/` and Reload Scripts.
 
 | Script | Purpose |
 |--------|---------|
-| `grim_fly.java` | Multi-mode fly — vehicle exempt / micro-step / KB / blink |
-| `grim_speed.java` | On-foot speed — bhop / micro-step / KB / timer (no motion scaling) |
-| `grim_movement_disabler.java` | Setback accept + C03 sync + KB/expl window tracking (softens, no speed) |
-| `grim_noslow.java` | Grim NoSlow — C07 release + slot flick (sword block); see below |
-| `grim_disabler.java` | **Legacy** — velocity inflate / txn delay (flags Simulation/Timer; defaults off) |
+| `grim_fly.java` | Multi-mode fly — vehicle / micro-step / KB / blink |
+| `grim_speed.java` | On-foot speed — strafe bhop / micro-step / timer |
+| `grim_velocity.java` | Knockback reduction — jump reset / attack-slow / motion scale |
+| `grim_movement_disabler.java` | Setback accept + C03 sync (`lenience.setSetbackTicks`) |
+| `grim_noslow.java` | Item-use slow bypass — C07 release + slot flick |
+| `grim_disabler.java` | **Legacy** — velocity inflate / txn delay (defaults off) |
+
+### grim_fly.java
+
+Modes (slider 0–3):
+
+| Mode | Technique |
+|------|-----------|
+| 0 Vehicle | Steer mounted entity via `packets.setSteer*` on C0C |
+| 1 Micro | 0.03 horizontal C03 position steps |
+| 2 Knockback | Inflate inbound S12 during hurt window |
+| 3 Blink | Hold C03 + C0F, move client-side, release last packet |
+
+**Auto vehicle** uses mode 0 whenever you're riding.
 
 ### grim_speed.java
 
-On-foot alternative when fly fights Grim Simulation. **Does not scale `client.setMotion`**
-(motion loops flag Simulation). Modes (slider 0–3):
+On-foot speed. **Does not scale `client.setMotion` in a loop** (compounds and
+desyncs). Modes (slider 0–2):
 
 | Mode | What it does |
 |------|----------------|
-| 0 Bhop | Auto sprint + ground jump — vanilla input only |
-| 1 Micro | Horizontal 0.03 C03 steps with `onGround=true` (point-three window) |
-| 2 Knockback | Inflate inbound S12 — ride KB lenience window |
-| 3 Timer | Subtle timer boost while moving (Grim Timer may flag — test only) |
+| 0 Strafe | `patchMovementInput` auto-strafe + optional air yaw steer |
+| 1 Bhop | Auto jump/sprint with manual strafe |
+| 2 Micro | Horizontal 0.03 C03 creep (slow test only) |
 
-Disabled automatically while riding. Resets timer on disable.
+Disabled automatically while riding.
+
+### grim_velocity.java
+
+Knockback handling while hurt. Modes (slider 0–3):
+
+| Mode | What it does |
+|------|----------------|
+| 0 Jump reset | Jump at hurtTime 9 while sprinting on ground |
+| 1 Intave | Attack-while-hurt motion scale + jump reset |
+| 2 Reduce | Scale motion each tick while hurt |
+| 3 Attack slow | Sprint + `client.attackEntity` during hurt window |
 
 ### grim_movement_disabler.java
 
-Softens movement checks — **does not speed you up**. The old version (txn delay,
-velocity inflate, motion boost) caused Simulation, Timer, BadPacketsN, and GroundSpoof.
+Setback sync helper — **does not speed you up**.
 
-| Feature | Softens | Notes |
-|---------|---------|-------|
-| Accept setbacks | BadPacketsN | Snap client to S08; Grim clears teleport queue |
-| Setback lock + sync ground | GroundSpoof | C03 matches snapped pos for a few ticks |
-| Track KB / expl window | AntiKB / AntiExplosion | Marks lenience after **unmodified** S12/S27 |
+| Feature | What it does |
+|---------|----------------|
+| Accept setbacks | Snap client to S08 position/rotation |
+| Setback lock | `lenience.setSetbackTicks(n)` after each snap |
+| C03 sync | Rewrite outgoing movement to snapped pos + onGround while lock active |
 
-Grim runs on the **server**. Inbound packet edits only change your client — server
-still predicts from what it sent. Disablers must fix what the server sees (C03/S08
-acceptance), not inflate what you receive.
-
-Use `grim_speed` separately only after this runs clean. Never block S08.
+Call `lenience.decayTick()` each tick and `lenience.reset()` on disable.
+Never block S08.
 
 ### grim_noslow.java
 
-**Grim mode** (default): each tick while using an item, calls `client.releaseUseItem()`
-and optional `client.heldItemChangeFlicker()`. **`itemUseSlowTarget()`** returns `1.0` so
-client movement stays full speed while blocking (Raven-style). Use for **sword block**; keep
-**Grim consumables** off unless you accept eat stutter.
+**Packet mode** (default): each tick while using an item, calls
+`client.releaseUseItem()` and optional `client.heldItemChangeFlicker()`.
+`itemUseSlowTarget()` returns `1.0` so client movement stays full speed while
+blocking. Use for sword block; keep consumables off unless you accept eat stutter.
 
-**Vanilla mode** (Grim mode off): **`itemUseSlowTarget()`** only — scales MovementInput via
-the script hook (Slow % slider). Do not scale `client.setMotion` in a loop (it compounds).
-
-Log results in `gnu client dev/Grim-bypass-log.md`.
+**MovementInput mode** (packet mode off): `itemUseSlowTarget()` only — scales
+MovementInput via the script hook (Slow % slider).
