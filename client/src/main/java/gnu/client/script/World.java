@@ -39,4 +39,17 @@ public final class World {
             return java.util.Collections.emptyList();
         return McAccess.getWorldEntities(world);
     }
+
+    public boolean isPlayer(Object entity) {
+        return McAccess.isEntityPlayer(entity);
+    }
+
+    public double distanceTo(Object entity) {
+        return McAccess.distanceToPlayer(entity);
+    }
+
+    /** Nearest other player within {@code range} blocks, or {@code null}. */
+    public Object getNearestPlayer(double range) {
+        return McAccess.getNearestPlayer(range);
+    }
 }

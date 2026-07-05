@@ -17,8 +17,14 @@ public final class GrimState {
 
     private GrimState() {}
 
+    /** Any tracked lenience window (setback, KB, or explosion). */
     public boolean lenient() {
         return setbackTicks.get() > 0 || kbWindow.get() > 0 || explWindow.get() > 0;
+    }
+
+    /** Setback-only — safe for C03 micro sync; do not use KB/expl windows for packet nudges. */
+    public boolean setbackLenient() {
+        return setbackTicks.get() > 0;
     }
 
     public int getSetbackTicks() {

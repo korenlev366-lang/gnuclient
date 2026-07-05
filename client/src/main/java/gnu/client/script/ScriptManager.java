@@ -496,6 +496,12 @@ public final class ScriptManager {
             McAccess.setFloat(movInput, "field_78902_a", strafe * scale);
             break;
         }
+
+        for (LoadedScript ls : loaded.values()) {
+            if (!ls.module.isEnabled())
+                continue;
+            invokeScriptVoidOneArg(ls.module, ls.module.getClass(), "patchMovementInput", movInput);
+        }
     }
 
     // ===================== reflective invocation =====================
@@ -553,6 +559,32 @@ public final class ScriptManager {
                     + " threw: " + cause.getClass().getSimpleName() + ": " + cause.getMessage());
             try { module.setEnabled(false); } catch (Throwable ignored) {}
             return null;
+        }
+    }
+
+    private void invokeScriptVoidOneArg(Module module, Class<?> clazz, String methodName, Object arg) {
+        try {
+            java.lang.reflect.Method target = null;
+            for (java.lang.reflect.Method m : clazz.getDeclaredMethods()) {
+                if (m.getName().equals(methodName) && m.getParameterCount() == 1
+                        && m.getReturnType() == void.class) {
+                    target = m;
+                    break;
+                }
+            }
+            if (target == null)
+                return;
+            target.setAccessible(true);
+            target.invoke(module, arg);
+        } catch (Throwable t) {
+            Throwable cause = t;
+            if (t instanceof java.lang.reflect.InvocationTargetException
+                    && ((java.lang.reflect.InvocationTargetException) t).getCause() != null) {
+                cause = ((java.lang.reflect.InvocationTargetException) t).getCause();
+            }
+            GnuLog.log("JAVA_ script '" + module.getName() + "' " + methodName
+                    + " threw: " + cause.getClass().getSimpleName() + ": " + cause.getMessage());
+            try { module.setEnabled(false); } catch (Throwable ignored) {}
         }
     }
 
