@@ -58,6 +58,46 @@ public final class Packets {
         return PacketHelper.isClientConfirmTransaction(packet);
     }
 
+    public boolean isServerTransaction(Object packet) {
+        return PacketHelper.isServerConfirmTransaction(packet);
+    }
+
+    public boolean isEntityAction(Object packet) {
+        return PacketHelper.isEntityAction(packet);
+    }
+
+    public boolean isBlockDig(Object packet) {
+        return PacketHelper.isBlockDig(packet);
+    }
+
+    public boolean isHeldItemChange(Object packet) {
+        return PacketHelper.isHeldItemChange(packet);
+    }
+
+    public boolean isSendUseItem(Object packet) {
+        return PacketHelper.isSendUseItem(packet);
+    }
+
+    public boolean isChatSend(Object packet) {
+        return PacketHelper.isChatSend(packet);
+    }
+
+    public boolean isChat(Object packet) {
+        return PacketHelper.isChat(packet);
+    }
+
+    public boolean isClientSettings(Object packet) {
+        return PacketHelper.isClientSettings(packet);
+    }
+
+    public boolean isCustomPayload(Object packet) {
+        return PacketHelper.isCustomPayload(packet);
+    }
+
+    public boolean isUpdateHealth(Object packet) {
+        return PacketHelper.isUpdateHealth(packet);
+    }
+
     public boolean isVelocity(Object packet) {
         return PacketHelper.isEntityVelocity(packet);
     }

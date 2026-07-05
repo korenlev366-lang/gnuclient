@@ -2,9 +2,11 @@ package gnu.client.script;
 
 import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
+import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.Setting;
 import gnu.client.module.setting.SliderSetting;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -14,8 +16,8 @@ import java.util.Map;
  * <p>One {@code Modules} instance is constructed per compiled script (see the
  * wrapper template in the feasibility report), bound to that script's
  * {@code scriptName} and to its owning generated {@link Module} subclass.
- * {@code registerButton}/{@code registerSlider} create real
- * {@link BoolSetting}/{@link SliderSetting} instances and attach them to the
+ * {@code registerButton}/{@code registerSlider}/{@code registerMode} create real
+ * {@link BoolSetting}/{@link SliderSetting}/{@link ModeSetting} instances and attach them to the
  * owning module via {@link Module#addScriptSetting}, which delegates to the
  * protected {@code addSetting} used by every hand-written module — so script
  * settings flow through the same list that {@code ConfigManager} serializes,
@@ -69,6 +71,18 @@ public final class Modules {
     }
 
     /**
+     * Register a mode (dropdown) setting on this script's module. {@code modeNames}
+     * are the display labels shown in the ClickGUI cycle button.
+     */
+    public void registerMode(String name, int defaultIndex, String... modeNames) {
+        if (owner == null || name == null || modeNames == null || modeNames.length == 0)
+            return;
+        ModeSetting setting = new ModeSetting(name, defaultIndex, Arrays.asList(modeNames));
+        owner.addScriptSetting(setting);
+        settings.put(name, setting);
+    }
+
+    /**
      * Read a boolean (button) setting value. Returns {@code false} if the
      * setting was never registered or is not a {@link BoolSetting}.
      */
@@ -89,5 +103,31 @@ public final class Modules {
         if (!(setting instanceof SliderSetting))
             return 0f;
         return ((SliderSetting) setting).getValue();
+    }
+
+    /**
+     * Read a mode setting's current index. Returns {@code 0} if the setting was
+     * never registered or is not a {@link ModeSetting}.
+     */
+    public int getModeIndex(String name) {
+        Setting<?> setting = settings.get(name);
+        if (!(setting instanceof ModeSetting))
+            return 0;
+        return ((ModeSetting) setting).getValue();
+    }
+
+    /**
+     * Read a mode setting's current label (e.g. {@code "Queue"}).
+     */
+    public String getMode(String name) {
+        Setting<?> setting = settings.get(name);
+        if (!(setting instanceof ModeSetting))
+            return "";
+        return ((ModeSetting) setting).getCurrentMode();
+    }
+
+    /** Convenience: {@code modules.isMode("Action", "Queue")}. */
+    public boolean isMode(String name, String modeName) {
+        return modeName != null && modeName.equals(getMode(name));
     }
 }
