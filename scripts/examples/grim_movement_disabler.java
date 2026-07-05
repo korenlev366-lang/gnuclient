@@ -1,3 +1,5 @@
+// DISCLAIMER: Does NOT bypass Grim. Bad experimental attempt — see scripts/examples/README.md.
+//
 // Grim Setback Sync — NOT a movement bypass.
 //
 // Grim patched "reuse setback velocity to bypass movement checks". This script only:

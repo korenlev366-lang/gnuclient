@@ -1,3 +1,5 @@
+// DISCLAIMER: Does NOT bypass Grim. Bad experimental attempt — see scripts/examples/README.md.
+//
 // Grim disabler — LEGACY test helper. Prefer grim_movement_disabler.java for movement.
 // Copy to ~/.config/gnuclient/scripts/ and Reload Scripts.
 //
