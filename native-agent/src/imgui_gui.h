@@ -24,6 +24,8 @@ void shutdown_context();
 
 void start_input();
 bool menu_open();
+void toggle_menu();
+void set_menu_open(bool open);
 bool menu_visible();
 bool is_left_down();
 bool is_shift_down();

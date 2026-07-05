@@ -22,6 +22,18 @@ extern "C" jboolean JNICALL jni_is_shift_down(JNIEnv*, jclass) {
     return ImGuiGui::is_shift_down() ? JNI_TRUE : JNI_FALSE;
 }
 
+extern "C" jboolean JNICALL jni_is_menu_open(JNIEnv*, jclass) {
+    return ImGuiGui::menu_open() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" void JNICALL jni_toggle_menu(JNIEnv*, jclass) {
+    ImGuiGui::toggle_menu();
+}
+
+extern "C" void JNICALL jni_set_menu_open(JNIEnv*, jclass, jboolean open) {
+    ImGuiGui::set_menu_open(open == JNI_TRUE);
+}
+
 void do_x11_click(int hold_us) {
     Display* dpy = XOpenDisplay(nullptr);
     if (!dpy) {
@@ -286,8 +298,14 @@ bool JniBridge::load_native_bootstrap(JNIEnv* env) {
          reinterpret_cast<void*>(&jni_consume_mouse_delta_y)},
         {const_cast<char*>("lastMouseMoveAgeMs"), const_cast<char*>("()J"),
          reinterpret_cast<void*>(&jni_last_mouse_move_age_ms)},
+        {const_cast<char*>("toggleMenuNative"), const_cast<char*>("()V"),
+         reinterpret_cast<void*>(&jni_toggle_menu)},
+        {const_cast<char*>("setMenuOpenNative"), const_cast<char*>("(Z)V"),
+         reinterpret_cast<void*>(&jni_set_menu_open)},
+        {const_cast<char*>("isMenuOpenNative"), const_cast<char*>("()Z"),
+         reinterpret_cast<void*>(&jni_is_menu_open)},
     };
-    jint reg = env->RegisterNatives(cls_, native_methods, 6);
+    jint reg = env->RegisterNatives(cls_, native_methods, 9);
     log_line("JNI_ RegisterNatives isLeftMouseDown: " + std::to_string(reg));
     if (reg != JNI_OK || check_and_clear(env, "RegisterNatives(NativeBootstrap)")) {
         log_line("JNI_ RegisterNatives NativeBootstrap.isLeftMouseDown failed");
@@ -310,6 +328,7 @@ bool JniBridge::load_native_bootstrap(JNIEnv* env) {
     mid_mod_desc_ = sm("guiModuleDesc", "(I)Ljava/lang/String;");
     mid_mod_cat_ = sm("guiModuleCategory", "(I)I");
     mid_mod_enabled_ = sm("guiModuleEnabled", "(I)Z");
+    mid_mod_bind_only_ = sm("guiModuleBindOnly", "(I)Z");
     mid_toggle_ = sm("guiToggle", "(I)V");
     mid_mod_key_label_ = sm("guiModuleKeyLabel", "(I)Ljava/lang/String;");
     mid_start_rebind_ = sm("startRebind", "(Ljava/lang/String;)V");
@@ -419,6 +438,13 @@ int JniBridge::gui_module_category(JNIEnv* env, int i) {
 bool JniBridge::gui_module_enabled(JNIEnv* env, int i) {
     if (!cls_ || !mid_mod_enabled_) return false;
     jboolean v = env->CallStaticBooleanMethod(cls_, mid_mod_enabled_, i);
+    if (env->ExceptionCheck()) { env->ExceptionClear(); return false; }
+    return v == JNI_TRUE;
+}
+
+bool JniBridge::gui_module_bind_only(JNIEnv* env, int i) {
+    if (!cls_ || !mid_mod_bind_only_) return false;
+    jboolean v = env->CallStaticBooleanMethod(cls_, mid_mod_bind_only_, i);
     if (env->ExceptionCheck()) { env->ExceptionClear(); return false; }
     return v == JNI_TRUE;
 }

@@ -268,6 +268,8 @@ public final class MappingTable {
         putMcpMember("field_75151_b", "inventorySlots"); // CSV: inventorySlots (with 's')
         putMcpMember("field_71074_e", "itemInUse");
         putMcpMember("field_71072_f", "itemInUseCount");
+        putMcpMember("field_149440_a", "message");   // C01PacketChatMessage (stable_22)
+        putMcpMember("func_149439_c", "getMessage"); // C01PacketChatMessage
 
         // ---- notch method names ----
         putMethod("func_71410_x", "S");   // getMinecraft
@@ -287,6 +289,8 @@ public final class MappingTable {
         putMethod("func_78898_a", "a");   // updatePlayerMoveState
         putMethod("func_70107_b", "b");   // setPosition
         putMethod("func_70016_h", "g");   // setVelocity
+        putMethod("func_149439_c", "a");  // getMessage (C01PacketChatMessage)
+        putField("field_149440_a", "a");  // message (C01PacketChatMessage)
     }
 
     private MappingTable() {}

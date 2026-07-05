@@ -50,6 +50,7 @@ public:
     std::string gui_module_desc(JNIEnv* env, int i);
     int gui_module_category(JNIEnv* env, int i);
     bool gui_module_enabled(JNIEnv* env, int i);
+    bool gui_module_bind_only(JNIEnv* env, int i);
     void gui_toggle(JNIEnv* env, int i);
     std::string gui_module_key_label(JNIEnv* env, int i);
     void start_rebind(JNIEnv* env, const char* module_name);
@@ -103,6 +104,7 @@ private:
     jmethodID mid_mod_desc_ = nullptr;
     jmethodID mid_mod_cat_ = nullptr;
     jmethodID mid_mod_enabled_ = nullptr;
+    jmethodID mid_mod_bind_only_ = nullptr;
     jmethodID mid_toggle_ = nullptr;
     jmethodID mid_mod_key_label_ = nullptr;
     jmethodID mid_start_rebind_ = nullptr;
