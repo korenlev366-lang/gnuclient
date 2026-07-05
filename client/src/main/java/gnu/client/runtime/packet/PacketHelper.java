@@ -515,6 +515,15 @@ public final class PacketHelper {
         return classNameContains(packet, "C07PacketPlayerDigging");
     }
 
+    /** C07 block dig / drop — not RELEASE_USE_ITEM. */
+    public static boolean isBlockDig(Object packet) {
+        return isPlayerDigging(packet) && !isReleaseUseItem(packet);
+    }
+
+    public static boolean isHeldItemChange(Object packet) {
+        return classNameContains(packet, "C09PacketHeldItemChange");
+    }
+
     /**
      * C07 RELEASE_USE_ITEM action — tells the server the player stopped blocking.
      * During autoblock lag windows, this MUST be cancelled to prevent the server

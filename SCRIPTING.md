@@ -101,7 +101,7 @@ All optional (a script with none of these is legal but does nothing).
 
 | Method | Signature | Called | Notes |
 |---|---|---|---|
-| `onLoad` | `void onLoad()` | Once, immediately after registration, **before** `ConfigManager.load()` runs | Register settings here via `modules.registerButton`/`registerSlider` |
+| `onLoad` | `void onLoad()` | Once, immediately after registration, **before** `ConfigManager.load()` runs | Register settings here via `modules.registerButton`/`registerSlider`/`registerMode` |
 | `onPreUpdate` | `void onPreUpdate()` | Once per tick at **ClientTick START** | Main tick logic |
 | `onPostUpdate` | `void onPostUpdate()` | Once per tick at **ClientTick END** (optional) | End-of-tick logic |
 | `onScriptDisable` | `void onScriptDisable()` | When the module is disabled | **Not** `onDisable` — that name collides with `Module`'s own override. Use `onScriptDisable`. |
@@ -287,15 +287,33 @@ a shared singleton — but you use it exactly the same way.
 ```java
 void    registerButton(String name, boolean defaultValue)
 void    registerSlider(String name, float defaultValue, float min, float max)
+void    registerMode(String name, int defaultIndex, String... modeNames)
 boolean getButton(String name)     // false if never registered or wrong type
 float   getSlider(String name)     // 0f if never registered or wrong type
+int     getModeIndex(String name)  // 0 if never registered or wrong type
+String  getMode(String name)       // current mode label, e.g. "Queue"
+boolean isMode(String name, String modeName)  // e.g. modules.isMode("Action", "Queue")
 String  getScriptName()
 ```
 
-Settings registered this way are **real** `BoolSetting`/`SliderSetting`
+Mode example:
+
+```java
+void onLoad() {
+    modules.registerMode("Action", 0, "Queue", "Disable");
+}
+
+void onPreUpdate() {
+    if (modules.isMode("Action", "Queue")) {
+        // ...
+    }
+}
+```
+
+Settings registered this way are **real** `BoolSetting`/`SliderSetting`/`ModeSetting`
 objects attached to the script's module — they render in the ClickGUI
-exactly like a hand-written module's settings, and persist through
-`ConfigManager`'s save/load just the same.
+exactly like a hand-written module's settings (mode settings show as a
+cycle button), and persist through `ConfigManager`'s save/load just the same.
 
 ### `packets` — packet inspection and mutation
 
@@ -313,6 +331,17 @@ boolean isBlockPlacement(Object packet)
 boolean isReleaseUseItem(Object packet)
 boolean isKeepAlive(Object packet)
 boolean isTransaction(Object packet)       // client OR server confirm-transaction
+boolean isClientTransaction(Object packet) // C0F outbound
+boolean isServerTransaction(Object packet) // S32 inbound
+boolean isEntityAction(Object packet)      // C0B sprint/sneak/etc.
+boolean isBlockDig(Object packet)          // C07 dig/drop, not release-use-item
+boolean isHeldItemChange(Object packet)    // C09
+boolean isSendUseItem(Object packet)       // C08 (same class as block place in 1.8.9)
+boolean isChatSend(Object packet)          // C01 outbound
+boolean isChat(Object packet)              // C01 or S02
+boolean isClientSettings(Object packet)    // C15
+boolean isCustomPayload(Object packet)     // C17
+boolean isUpdateHealth(Object packet)      // S06
 boolean isVelocity(Object packet)          // S12, any entity
 boolean isSelfVelocity(Object packet)      // S12, self only
 boolean isExplosion(Object packet)
