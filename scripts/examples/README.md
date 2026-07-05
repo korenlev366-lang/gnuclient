@@ -6,7 +6,7 @@
 
 | Script | Purpose |
 |--------|---------|
-| `packet_queue_disabler.java` | Per-packet outbound/inbound queue or disable — `registerMode` for Action/Direction, `packetSendPriority()` demo |
+| `disabler.java` | Per-packet outbound/inbound queue or disable — `registerMode` for Action/Direction, `packetSendPriority()` demo |
 
 ## Grim scripts (experimental / failed)
 
