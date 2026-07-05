@@ -6,7 +6,7 @@
 
 | Script | Purpose |
 |--------|---------|
-| `packet_queue_disabler.java` | Queue outbound packets for a timed hold, flush, gap, repeat — includes `packetSendPriority()` demo |
+| `packet_queue_disabler.java` | Per-packet outbound queue (timed hold/flush/gap) or disable mode — includes `packetSendPriority()` demo |
 
 ## Grim scripts (experimental / failed)
 
