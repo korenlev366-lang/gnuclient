@@ -150,17 +150,17 @@ public final class Client {
         McAccess.setEntityYaw(entity, yaw);
     }
 
-    /** Boat/horse input packet — keep forward/sideways under 0.98 for Grim VehicleA. */
+    /** {@code C0C} steer packet for mounted vehicles (boat/horse/pig/minecart). */
     public void sendSteer(float strafe, float forward, boolean jump, boolean unmount) {
         McAccess.sendSteerVehicle(strafe, forward, jump, unmount);
     }
 
-    /** {@code C07 RELEASE_USE_ITEM} — clears Grim/server item-use slow (noslow Grim mode). */
+    /** {@code C07 RELEASE_USE_ITEM} — clears server item-use slow while eating/blocking. */
     public void releaseUseItem() {
         McAccess.sendReleaseUseItem(getPlayer());
     }
 
-    /** Raven-style {@code C09} slot flick (noslow Grim mode). */
+    /** {@code C09} hotbar slot flick (brief slot swap to reset use state). */
     public void heldItemChangeFlicker() {
         McAccess.sendHeldItemChangeFlicker();
     }

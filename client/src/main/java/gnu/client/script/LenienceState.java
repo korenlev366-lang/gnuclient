@@ -3,19 +3,19 @@ package gnu.client.script;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Thread-safe shared Grim lenience state for script disablers and speed modules.
- * Updated from {@code onPacketReceive} (Netty thread) and decayed from
+ * Thread-safe shared lenience-window counters for setback sync and knockback
+ * timing. Updated from {@code onPacketReceive} (Netty thread) and decayed from
  * {@code onPreUpdate} (main thread).
  */
-public final class GrimState {
+public final class LenienceState {
 
-    public static final GrimState INSTANCE = new GrimState();
+    public static final LenienceState INSTANCE = new LenienceState();
 
     private final AtomicInteger setbackTicks = new AtomicInteger(0);
     private final AtomicInteger kbWindow = new AtomicInteger(0);
     private final AtomicInteger explWindow = new AtomicInteger(0);
 
-    private GrimState() {}
+    private LenienceState() {}
 
     /** Any tracked lenience window (setback, KB, or explosion). */
     public boolean lenient() {

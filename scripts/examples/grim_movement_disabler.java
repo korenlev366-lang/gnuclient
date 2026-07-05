@@ -31,7 +31,7 @@ void snapSetback(Object packet) {
 
     int lock = (int) modules.getSlider("Setback lock");
     if (lock < 1) lock = 1;
-    grim.setSetbackTicks(lock);
+    lenience.setSetbackTicks(lock);
 }
 
 boolean onPacketReceive(Object packet) {
@@ -43,7 +43,7 @@ boolean onPacketReceive(Object packet) {
 }
 
 boolean onPacketSend(Object packet) {
-    if (grim.getSetbackTicks() <= 0 || !packets.isMovement(packet))
+    if (lenience.getSetbackTicks() <= 0 || !packets.isMovement(packet))
         return false;
 
     if (packets.hasPosition(packet)) {
@@ -56,9 +56,9 @@ boolean onPacketSend(Object packet) {
 }
 
 void onPreUpdate() {
-    grim.decayTick();
+    lenience.decayTick();
 }
 
 void onScriptDisable() {
-    grim.reset();
+    lenience.reset();
 }
