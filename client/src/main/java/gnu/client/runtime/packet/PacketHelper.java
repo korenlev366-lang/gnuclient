@@ -97,7 +97,8 @@ public final class PacketHelper {
     }
 
     public static boolean isPlayerMovement(Object packet) {
-        return classNameContains(packet, "C03PacketPlayer");
+        return isInstanceOfGameClass(packet, "net.minecraft.network.play.client.C03PacketPlayer")
+                || classNameContains(packet, "C03PacketPlayer");
     }
 
     public static double c03PosX(Object packet) {
@@ -173,7 +174,10 @@ public final class PacketHelper {
     private static final String FIELD_C03_X = "field_149479_a";
     private static final String FIELD_C03_Y = "field_149477_b";
     private static final String FIELD_C03_Z = "field_149478_c";
+    private static final String FIELD_C03_YAW = "field_149476_e";
+    private static final String FIELD_C03_PITCH = "field_149473_f";
     private static final String FIELD_C03_ON_GROUND = "field_149474_g";
+    private static final String FIELD_C03_ROTATING = "field_149481_i";
 
     public static void c03SetPosition(Object packet, double x, double y, double z) {
         if (!c03HasPosition(packet))
@@ -187,6 +191,58 @@ public final class PacketHelper {
         if (!isPlayerMovement(packet))
             return;
         McAccess.setBool(packet, FIELD_C03_ON_GROUND, onGround);
+    }
+
+    public static boolean c03HasRotation(Object packet) {
+        if (!isPlayerMovement(packet))
+            return false;
+        String name = packet.getClass().getName();
+        if (name.contains("C05Packet") || name.contains("C06Packet"))
+            return true;
+        Object rotating = McAccess.invoke(packet, "func_149463_k", new Class<?>[0]);
+        if (!(rotating instanceof Boolean))
+            rotating = McAccess.invokeNamed(packet, "isRotating", new Class<?>[0]);
+        return rotating instanceof Boolean && (Boolean) rotating;
+    }
+
+    public static float c03Yaw(Object packet) {
+        if (!isPlayerMovement(packet))
+            return 0.0f;
+        Object value = McAccess.invoke(packet, "func_149462_g", new Class<?>[0]);
+        if (!(value instanceof Number))
+            value = McAccess.invokeNamed(packet, "getYaw", new Class<?>[0]);
+        return value instanceof Number ? ((Number) value).floatValue() : McAccess.getFloat(packet, FIELD_C03_YAW);
+    }
+
+    public static float c03Pitch(Object packet) {
+        if (!isPlayerMovement(packet))
+            return 0.0f;
+        Object value = McAccess.invoke(packet, "func_149470_h", new Class<?>[0]);
+        if (!(value instanceof Number))
+            value = McAccess.invokeNamed(packet, "getPitch", new Class<?>[0]);
+        return value instanceof Number ? ((Number) value).floatValue() : McAccess.getFloat(packet, FIELD_C03_PITCH);
+    }
+
+    public static void c03SetRotation(Object packet, float yaw, float pitch) {
+        if (!isPlayerMovement(packet))
+            return;
+        McAccess.setFloat(packet, FIELD_C03_YAW, yaw);
+        McAccess.setFloat(packet, FIELD_C03_PITCH, pitch);
+        McAccess.setBool(packet, FIELD_C03_ROTATING, true);
+    }
+
+    public static void c03SetYaw(Object packet, float yaw) {
+        if (!isPlayerMovement(packet))
+            return;
+        McAccess.setFloat(packet, FIELD_C03_YAW, yaw);
+        McAccess.setBool(packet, FIELD_C03_ROTATING, true);
+    }
+
+    public static void c03SetPitch(Object packet, float pitch) {
+        if (!isPlayerMovement(packet))
+            return;
+        McAccess.setFloat(packet, FIELD_C03_PITCH, pitch);
+        McAccess.setBool(packet, FIELD_C03_ROTATING, true);
     }
 
     public static int entityId(Object packet) {
@@ -524,6 +580,22 @@ public final class PacketHelper {
         return classNameContains(packet, "C09PacketHeldItemChange");
     }
 
+    /** Hotbar index from {@code C09PacketHeldItemChange}, or {@code -1}. */
+    public static int c09Slot(Object packet) {
+        if (!isHeldItemChange(packet))
+            return -1;
+        Object value = McAccess.invokeNamed(packet, "getSlotId", new Class<?>[0]);
+        if (value instanceof Integer)
+            return (Integer) value;
+        value = McAccess.invoke(packet, "func_149576_a", new Class<?>[0]);
+        if (value instanceof Integer)
+            return (Integer) value;
+        int slot = McAccess.getInt(packet, "field_149576_a");
+        if (slot >= 0 && slot <= 8)
+            return slot;
+        return -1;
+    }
+
     /**
      * C07 RELEASE_USE_ITEM action — tells the server the player stopped blocking.
      * During autoblock lag windows, this MUST be cancelled to prevent the server
@@ -539,7 +611,8 @@ public final class PacketHelper {
     }
 
     public static boolean isBlockPlacement(Object packet) {
-        return classNameContains(packet, "C08PacketPlayerBlockPlacement");
+        return isInstanceOfGameClass(packet, "net.minecraft.network.play.client.C08PacketPlayerBlockPlacement")
+                || classNameContains(packet, "C08PacketPlayerBlockPlacement");
     }
 
     /**
@@ -772,5 +845,12 @@ public final class PacketHelper {
 
     private static boolean classNameContains(Object packet, String fragment) {
         return packet != null && packet.getClass().getName().contains(fragment);
+    }
+
+    private static boolean isInstanceOfGameClass(Object packet, String binaryName) {
+        if (packet == null)
+            return false;
+        Class<?> cls = McAccess.gameClass(binaryName);
+        return cls != null && cls.isInstance(packet);
     }
 }

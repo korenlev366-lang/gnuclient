@@ -19,7 +19,9 @@ import gnu.client.module.modules.player.BridgeAssistModule;
 import gnu.client.module.modules.movement.FastStopModule;
 import gnu.client.module.modules.movement.SprintModule;
 import gnu.client.module.modules.movement.StasisModule;
+import gnu.client.module.modules.movement.TimerModule;
 import gnu.client.module.modules.player.FastPlaceModule;
+import gnu.client.module.modules.player.ScaffoldModule;
 
 import gnu.client.module.modules.visual.BedEspModule;
 import gnu.client.module.modules.visual.EspModule;
@@ -135,6 +137,11 @@ public final class NativeBootstrap {
                 GnuLog.log("MODULE FAIL FastStopModule: " + e);
             }
             try {
+                mgr.register(new TimerModule());
+            } catch (Exception e) {
+                GnuLog.log("MODULE FAIL TimerModule: " + e);
+            }
+            try {
                 mgr.register(new VelocityModule());
             } catch (Exception e) {
                 GnuLog.log("MODULE FAIL VelocityModule: " + e);
@@ -143,6 +150,11 @@ public final class NativeBootstrap {
                 mgr.register(new FastPlaceModule());
             } catch (Exception e) {
                 GnuLog.log("MODULE FAIL FastPlaceModule: " + e);
+            }
+            try {
+                mgr.register(new ScaffoldModule());
+            } catch (Exception e) {
+                GnuLog.log("MODULE FAIL ScaffoldModule: " + e);
             }
 
             try {
@@ -261,6 +273,7 @@ public final class NativeBootstrap {
             gnu.client.script.ScriptManager.instance().reloadAll();
             ChatCommandHandler.register();
             McAccess.resetTimer();
+            TimerModule.maintain();
 
             initialized = true;
             GnuLog.log("JAVA_READY profile=" + McAccess.profile().label() + " modules=" + GUI_MODULES.size());

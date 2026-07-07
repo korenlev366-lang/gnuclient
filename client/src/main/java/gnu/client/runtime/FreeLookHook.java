@@ -33,6 +33,8 @@ public final class FreeLookHook {
 
     private static final String FIELD_ROTATION_YAW = "field_70177_z";
     private static final String FIELD_ROTATION_PITCH = "field_70125_A";
+    private static final String FIELD_PREV_ROTATION_YAW = "field_70126_B";
+    private static final String FIELD_PREV_ROTATION_PITCH = "field_70127_C";
 
     private FreeLookHook() {}
 
@@ -76,6 +78,40 @@ public final class FreeLookHook {
         }
         if (entity == null) return 0f;
         return McAccess.getFloat(entity, FIELD_ROTATION_PITCH);
+    }
+
+    /**
+     * Redirects a read of {@code Entity.prevRotationYaw} (field_70126_B).
+     *
+     * <p>Raven parity: return the same camera yaw as {@link #redirectYaw} so
+     * orientCamera interpolation does not blend between frozen body rotation and
+     * the freelook camera.
+     */
+    public static float redirectPrevYaw(Object entity) {
+        FreeLookModule fl = getActiveFreeLook();
+        if (fl != null) {
+            Object player = McAccess.thePlayer();
+            if (player != null && player == entity) {
+                return fl.getCameraYaw();
+            }
+        }
+        if (entity == null) return 0f;
+        return McAccess.getFloat(entity, FIELD_PREV_ROTATION_YAW);
+    }
+
+    /**
+     * Redirects a read of {@code Entity.prevRotationPitch} (field_70127_C).
+     */
+    public static float redirectPrevPitch(Object entity) {
+        FreeLookModule fl = getActiveFreeLook();
+        if (fl != null) {
+            Object player = McAccess.thePlayer();
+            if (player != null && player == entity) {
+                return fl.getCameraPitch();
+            }
+        }
+        if (entity == null) return 0f;
+        return McAccess.getFloat(entity, FIELD_PREV_ROTATION_PITCH);
     }
 
     /**

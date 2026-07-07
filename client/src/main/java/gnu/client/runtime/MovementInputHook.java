@@ -1,6 +1,7 @@
 package gnu.client.runtime;
 
 import gnu.client.module.modules.player.BridgeAssistModule;
+import gnu.client.module.modules.player.ScaffoldModule;
 import gnu.client.module.modules.movement.StasisModule;
 import gnu.client.script.ScriptManager;
 
@@ -13,6 +14,7 @@ public final class MovementInputHook {
 
     public static void afterUpdatePlayerMoveState(Object movementInput) {
         BridgeAssistModule.patchMovementInput(movementInput);
+        ScaffoldModule.patchMovementInput(movementInput);
         ScriptManager.instance().patchMovementInput(movementInput);
         StasisModule.patchPlayerInput(movementInput);
     }

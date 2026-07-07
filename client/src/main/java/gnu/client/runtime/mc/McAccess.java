@@ -1810,6 +1810,46 @@ public final class McAccess {
         }
     }
 
+    public static void sendSneakActionPacket(Object player, boolean startSneaking) {
+        if (player == null)
+            return;
+        try {
+            Class<?> actionEnum = gameClass("net.minecraft.network.play.client.C0BPacketEntityAction$Action");
+            if (actionEnum == null)
+                return;
+            String actionName = startSneaking ? "START_SNEAKING" : "STOP_SNEAKING";
+            Object action = null;
+            for (Object constant : actionEnum.getEnumConstants()) {
+                if (constant != null && actionName.equals(constant.toString())) {
+                    action = constant;
+                    break;
+                }
+            }
+            if (action == null)
+                return;
+            Class<?> entityCls = gameClass("net.minecraft.entity.Entity");
+            Object packet = newInstance("net.minecraft.network.play.client.C0BPacketEntityAction",
+                    new Class<?>[] { entityCls, actionEnum }, player, action);
+            if (packet != null)
+                gnu.client.runtime.packet.PacketUtil.sendPacket(packet);
+        } catch (Throwable t) {
+            GnuLog.log("JAVA_ McAccess sendSneakActionPacket error: " + t);
+        }
+    }
+
+    public static void sendPlayerRotation(float yaw, float pitch, boolean onGround) {
+        try {
+            Object packet = newInstance(
+                    "net.minecraft.network.play.client.C03PacketPlayer$C05PacketPlayerLook",
+                    new Class<?>[] { float.class, float.class, boolean.class },
+                    yaw, Math.max(-90.0f, Math.min(90.0f, pitch)), onGround);
+            if (packet != null)
+                gnu.client.runtime.packet.PacketUtil.sendPacket(packet);
+        } catch (Throwable t) {
+            GnuLog.log("JAVA_ McAccess sendPlayerRotation error: " + t);
+        }
+    }
+
     /**
      * Send C07PacketPlayerDigging with RELEASE_USE_ITEM action — tells the server
      * we stopped using the item (sword block / shield / eating). Used by AutoBlockModule
@@ -2128,6 +2168,332 @@ public final class McAccess {
         if (blockPosCls == null)
             return null;
         return invoke(world, "func_180495_p", new Class<?>[] { blockPosCls }, pos);
+    }
+
+    public static Object getBlockFromState(Object state) {
+        Object block = invoke(state, "func_177230_c", new Class<?>[0]);
+        if (block == null)
+            block = invokeNamed(state, "getBlock", new Class<?>[0]);
+        return block;
+    }
+
+    public static boolean isAirBlock(Object world, int x, int y, int z) {
+        Object pos = newInstance("net.minecraft.util.BlockPos",
+                new Class<?>[] { int.class, int.class, int.class }, x, y, z);
+        if (pos == null)
+            return true;
+        Class<?> blockPosCls = gameClass("net.minecraft.util.BlockPos");
+        Object r = invoke(world, "func_175623_d", new Class<?>[] { blockPosCls }, pos);
+        return r instanceof Boolean && (Boolean) r;
+    }
+
+    public static boolean isReplaceable(Object world, int x, int y, int z) {
+        if (world == null)
+            return true;
+        if (isAirBlock(world, x, y, z))
+            return true;
+        Object pos = newInstance("net.minecraft.util.BlockPos",
+                new Class<?>[] { int.class, int.class, int.class }, x, y, z);
+        Object state = getBlockState(world, x, y, z);
+        Object block = getBlockFromState(state);
+        Class<?> worldCls = gameClass("net.minecraft.world.World");
+        Class<?> blockPosCls = gameClass("net.minecraft.util.BlockPos");
+        if (block != null && worldCls != null && blockPosCls != null && pos != null) {
+            Object r = invoke(block, "func_176200_f", new Class<?>[] { worldCls, blockPosCls }, world, pos);
+            if (r instanceof Boolean)
+                return (Boolean) r;
+            r = invokeNamed(block, "isReplaceable", new Class<?>[] { worldCls, blockPosCls }, world, pos);
+            if (r instanceof Boolean)
+                return (Boolean) r;
+        }
+        return false;
+    }
+
+    public static Object getEntityBoundingBox(Object entity) {
+        return invoke(entity, "func_174813_aQ", new Class<?>[0]);
+    }
+
+    public static double aabbMinX(Object aabb) { return getDouble(aabb, "field_72340_a"); }
+    public static double aabbMinY(Object aabb) { return getDouble(aabb, "field_72338_b"); }
+    public static double aabbMinZ(Object aabb) { return getDouble(aabb, "field_72339_c"); }
+    public static double aabbMaxX(Object aabb) { return getDouble(aabb, "field_72336_d"); }
+    public static double aabbMaxY(Object aabb) { return getDouble(aabb, "field_72337_e"); }
+    public static double aabbMaxZ(Object aabb) { return getDouble(aabb, "field_72334_f"); }
+
+    public static int getStackSize(Object stack) {
+        if (stack == null)
+            return 0;
+        int size = getInt(stack, "field_77994_a");
+        if (size > 0)
+            return size;
+        Object item = getItemFromStack(stack);
+        if (item != null && getBlockFromItemStack(stack) != null)
+            return 64;
+        Object r = invoke(stack, "func_77976_d", new Class<?>[0]);
+        return r instanceof Integer ? (Integer) r : 0;
+    }
+
+    public static Object getItemFromStack(Object stack) {
+        if (stack == null)
+            return null;
+        Object item = invoke(stack, "func_77973_b", new Class<?>[0]);
+        if (item == null)
+            item = invokeNamed(stack, "getItem", new Class<?>[0]);
+        return item;
+    }
+
+    public static Object getBlockFromItemStack(Object stack) {
+        Object item = getItemFromStack(stack);
+        if (item == null)
+            return null;
+        Object block = invoke(item, "func_179223_d", new Class<?>[0]);
+        if (block == null)
+            block = invokeNamed(item, "getBlock", new Class<?>[0]);
+        return block;
+    }
+
+    public static boolean isValidScaffoldStack(Object stack) {
+        Object block = getBlockFromItemStack(stack);
+        if (block == null || getStackSize(stack) <= 0)
+            return false;
+        if (isFallingBlock(block))
+            return false;
+        String name = String.valueOf(block);
+        if (name.contains("tnt") || name.contains("web") || name.contains("torch") || name.contains("ladder"))
+            return false;
+        return true;
+    }
+
+    public static boolean isFallingBlock(Object block) {
+        if (block == null)
+            return false;
+        Class<?> falling = gameClass("net.minecraft.block.BlockFalling");
+        return falling != null && falling.isInstance(block);
+    }
+
+    public static boolean isFullCubeBlock(Object block) {
+        if (block == null)
+            return false;
+        Object r = invoke(block, "func_149686_d", new Class<?>[0]);
+        if (r instanceof Boolean)
+            return (Boolean) r;
+        r = invokeNamed(block, "isFullCube", new Class<?>[0]);
+        return r instanceof Boolean && (Boolean) r;
+    }
+
+    public static boolean hasTileEntityBlock(Object block) {
+        if (block == null)
+            return false;
+        Object r = invoke(block, "func_149716_u", new Class<?>[0]);
+        if (r instanceof Boolean)
+            return (Boolean) r;
+        r = invokeNamed(block, "hasTileEntity", new Class<?>[0]);
+        return r instanceof Boolean && (Boolean) r;
+    }
+
+    /** {@code PlayerControllerMP.blockReachDistance} — SRG {@code field_78788_d} (1.8.9). */
+    public static double getBlockReachDistance() {
+        Object controller = playerController();
+        if (controller == null)
+            return 4.5;
+        Object value = getObject(controller, "field_78788_d");
+        if (value instanceof Double)
+            return (Double) value;
+        if (value instanceof Float)
+            return (Float) value;
+        return 4.5;
+    }
+
+    /** {@code EntityPlayerSP.swingItem} — SRG {@code func_71038_i}. */
+    public static void swingItem() {
+        Object player = thePlayer();
+        if (player == null)
+            return;
+        invoke(player, "func_71038_i", new Class<?>[0]);
+    }
+
+    /** Client-side hotbar slot — {@code InventoryPlayer.currentItem} (SRG {@code field_70961_c}). */
+    public static void setHotbarSlot(Object player, int slot) {
+        if (player == null || slot < 0 || slot > 8)
+            return;
+        Object inv = getObject(player, "field_71071_by");
+        if (inv == null)
+            return;
+        setInt(inv, "field_70961_c", slot);
+    }
+
+    /**
+     * {@code PlayerControllerMP.onPlayerRightClick} — SRG {@code func_178890_a} (1.8.9).
+     * Places a block against {@code blockPos} on {@code enumFacing} with {@code hitVec}.
+     */
+    public static boolean onPlayerRightClick(Object blockPos, Object enumFacing, Object hitVec) {
+        Object player = thePlayer();
+        Object world = theWorld();
+        Object stack = getHeldItemStack();
+        return onPlayerRightClick(player, world, stack, blockPos, enumFacing, hitVec);
+    }
+
+    public static boolean onPlayerRightClick(Object player, Object world, Object stack,
+                                             Object blockPos, Object enumFacing, Object hitVec) {
+        Object controller = playerController();
+        if (player == null || world == null || controller == null)
+            return false;
+        if (stack == null || blockPos == null || enumFacing == null || hitVec == null)
+            return false;
+
+        Class<?> stackCls = gameClass("net.minecraft.item.ItemStack");
+        if (stackCls == null)
+            return false;
+
+        Object[] args = new Object[] { player, world, stack, blockPos, enumFacing, hitVec };
+
+        boolean optifineController = controller.getClass().getName().contains("PlayerControllerOF");
+        Object vanillaResult = optifineController ? invokePlacementMethod(controller, args, true) : null;
+        if (vanillaResult instanceof Boolean)
+            return (Boolean) vanillaResult;
+
+        Object result = invokePlacementMethod(controller, args, false);
+        if (Boolean.TRUE.equals(result))
+            return true;
+
+        if (!optifineController)
+            vanillaResult = invokePlacementMethod(controller, args, true);
+        if (vanillaResult instanceof Boolean)
+            return (Boolean) vanillaResult;
+        if (result instanceof Boolean)
+            return (Boolean) result;
+
+        logPlacementResolveFailure(controller);
+        return false;
+    }
+
+    public static boolean sendBlockPlacementPacket(Object blockPos, Object enumFacing, Object hitVec) {
+        return sendBlockPlacementPacket(getHeldItemStack(), blockPos, enumFacing, hitVec);
+    }
+
+    public static boolean sendBlockPlacementPacket(Object stack, Object blockPos,
+                                                   Object enumFacing, Object hitVec) {
+        if (blockPos == null || enumFacing == null || hitVec == null || stack == null)
+            return false;
+        try {
+            Class<?> blockPosCls = gameClass("net.minecraft.util.BlockPos");
+            Class<?> stackCls = gameClass("net.minecraft.item.ItemStack");
+            if (blockPosCls == null || stackCls == null)
+                return false;
+
+            int bx = blockPosInt(blockPos, "func_177958_n", "getX");
+            int by = blockPosInt(blockPos, "func_177956_o", "getY");
+            int bz = blockPosInt(blockPos, "func_177952_p", "getZ");
+            float hitX = (float) (getDouble(hitVec, "field_72450_a") - bx);
+            float hitY = (float) (getDouble(hitVec, "field_72448_b") - by);
+            float hitZ = (float) (getDouble(hitVec, "field_72449_c") - bz);
+            int face = enumOrdinal(enumFacing);
+
+            Object packet = newInstance("net.minecraft.network.play.client.C08PacketPlayerBlockPlacement",
+                    new Class<?>[] { blockPosCls, int.class, stackCls, float.class, float.class, float.class },
+                    blockPos, face, stack, hitX, hitY, hitZ);
+            if (packet == null)
+                return false;
+            addToSendQueue(packet);
+            return true;
+        } catch (Throwable t) {
+            GnuLog.log("JAVA_ McAccess sendBlockPlacementPacket error: " + t);
+            return false;
+        }
+    }
+
+    private static int enumOrdinal(Object value) {
+        if (value instanceof Enum<?>)
+            return ((Enum<?>) value).ordinal();
+        Object ordinal = invokeNamed(value, "ordinal", new Class<?>[0]);
+        return ordinal instanceof Integer ? (Integer) ordinal : 0;
+    }
+
+    private static int blockPosInt(Object blockPos, String srg, String named) {
+        Object value = invoke(blockPos, srg, new Class<?>[0]);
+        if (!(value instanceof Integer))
+            value = invokeNamed(blockPos, named, new Class<?>[0]);
+        return value instanceof Integer ? (Integer) value : 0;
+    }
+
+    private static volatile boolean placementResolveFailureLogged;
+
+    private static Object invokePlacementMethod(Object controller, Object[] args, boolean vanillaOnly) {
+        if (controller == null || args == null)
+            return null;
+        Class<?> start = vanillaOnly
+                ? gameClass("net.minecraft.client.multiplayer.PlayerControllerMP")
+                : controller.getClass();
+        if (start == null || !start.isAssignableFrom(controller.getClass()))
+            return null;
+        String[] names = new String[] { "func_178890_a", "onPlayerRightClick", "func_78765_a", "a" };
+        for (Class<?> c = start; c != null; c = c.getSuperclass()) {
+            for (Method m : c.getDeclaredMethods()) {
+                if (m.getParameterTypes().length != args.length)
+                    continue;
+                boolean nameMatches = false;
+                for (String name : names) {
+                    if (m.getName().equals(name)) {
+                        nameMatches = true;
+                        break;
+                    }
+                }
+                if (!nameMatches || !parametersAccept(m.getParameterTypes(), args))
+                    continue;
+                try {
+                    m.setAccessible(true);
+                    Object result = m.invoke(controller, args);
+                    return m.getReturnType() == void.class ? Boolean.TRUE : result;
+                } catch (Throwable t) {
+                    GnuLog.log("JAVA_ McAccess placement invoke error method=" + c.getName()
+                            + "#" + m.getName() + " err=" + t);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static void logPlacementResolveFailure(Object controller) {
+        if (placementResolveFailureLogged)
+            return;
+        placementResolveFailureLogged = true;
+        if (controller == null)
+            return;
+        GnuLog.log("JAVA_ McAccess placement method resolve failed controller=" + controller.getClass().getName());
+        logPlacementMethods(controller);
+    }
+
+    private static void logPlacementMethods(Object controller) {
+        try {
+            int logged = 0;
+            for (Class<?> c = controller.getClass(); c != null && logged < 12; c = c.getSuperclass()) {
+                for (Method m : c.getDeclaredMethods()) {
+                    if (m.getParameterTypes().length < 5 || m.getParameterTypes().length > 7)
+                        continue;
+                    String name = m.getName();
+                    if (!"a".equals(name) && !"func_178890_a".equals(name)
+                            && !"func_78765_a".equals(name) && !"onPlayerRightClick".equals(name))
+                        continue;
+                    GnuLog.log("JAVA_ placement method candidate " + c.getName() + "#" + m);
+                    logged++;
+                    if (logged >= 12)
+                        return;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static boolean parametersAccept(Class<?>[] params, Object[] args) {
+        if (params == null || args == null || params.length != args.length)
+            return false;
+        for (int i = 0; i < params.length; i++) {
+            if (args[i] == null)
+                return false;
+            if (!params[i].isAssignableFrom(args[i].getClass()))
+                return false;
+        }
+        return true;
     }
 
     /** Inclusive random int in {@code [min, max]} using the shared {@link #SHARED_RANDOM}. */

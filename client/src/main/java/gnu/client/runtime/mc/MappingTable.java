@@ -35,14 +35,25 @@ public final class MappingTable {
         MCP_TO_NOTCH_CLASS.put("net.minecraft.util.Timer", "bhe");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.client.gui.ScaledResolution", "avp");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.network.play.client.C0BPacketEntityAction", "iw");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.network.play.client.C03PacketPlayer", "ip");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.network.play.client.C03PacketPlayer$C05PacketPlayerLook", "ip$a");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.network.play.client.C08PacketPlayerBlockPlacement", "ja");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.network.play.client.C09PacketHeldItemChange", "jb");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.client.renderer.entity.RenderManager", "biu");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.world.World", "adm");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.client.multiplayer.WorldClient", "bdb");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.item.ItemStack", "zx");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.util.EnumFacing", "cq");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.util.Vec3", "aui");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.util.MathHelper", "auz");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.util.AxisAlignedBB", "aug");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.block.Block", "afh");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.block.BlockFalling", "alj");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.item.ItemBlock", "abh");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.item.ItemSword", "aay");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.item.ItemAxe", "yl");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.entity.player.EntityPlayer", "wn");
-        MCP_TO_NOTCH_CLASS.put("net.minecraft.util.BlockPos", "dt");
+        MCP_TO_NOTCH_CLASS.put("net.minecraft.util.BlockPos", "cj");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.util.MovingObjectPosition", "auh");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.client.multiplayer.PlayerControllerMP", "bda");
         MCP_TO_NOTCH_CLASS.put("net.minecraft.client.settings.KeyboardInput", "bhd");
@@ -112,7 +123,13 @@ public final class MappingTable {
         putMcpMember("field_149617_b", "forwardSpeed");
         putMcpMember("field_149619_c", "jumping");
         putMcpMember("field_149616_d", "sneaking");
+        putField("field_175170_bN", "bK"); // serverSneakState
         putField("field_175171_bO", "bL"); // serverSprintState
+        putField("field_175172_bI", "bM"); // lastReportedPosX
+        putField("field_175166_bJ", "bN"); // lastReportedPosY
+        putField("field_175167_bK", "bO"); // lastReportedPosZ
+        putField("field_175164_bL", "bP"); // lastReportedYaw
+        putField("field_175165_bM", "bQ"); // lastReportedPitch
 
         // ---- GameSettings keybinds ----
         putField("field_74311_E", "ad");  // keyBindSneak
@@ -146,6 +163,17 @@ public final class MappingTable {
         putField("field_72308_g", "d");   // entityHit
         putField("field_72307_f", "c");   // hitVec
         putField("field_72313_a", "a");   // typeOfHit
+        putField("field_178784_b", "b");   // sideHit
+
+        // ---- C03PacketPlayer ----
+        putField("field_149479_a", "a");  // x
+        putField("field_149477_b", "b");  // y
+        putField("field_149478_c", "c");  // z
+        putField("field_149476_e", "d");  // yaw
+        putField("field_149473_f", "e");  // pitch
+        putField("field_149474_g", "f");  // onGround
+        putField("field_149480_h", "g");  // moving
+        putField("field_149481_i", "h");  // rotating
 
         // ---- World / WorldClient ----
         putField("field_73010_i", "b");  // playerEntities (WorldClient)
@@ -187,7 +215,13 @@ public final class MappingTable {
         putMcpMember("field_70181_x", "motionY");
         putMcpMember("field_70179_y", "motionZ");
         putMcpMember("field_70151_cx", "isSprinting"); // legacy
+        putMcpMember("field_175170_bN", "serverSneakState");
         putMcpMember("field_175171_bO", "serverSprintState");
+        putMcpMember("field_175172_bI", "lastReportedPosX");
+        putMcpMember("field_175166_bJ", "lastReportedPosY");
+        putMcpMember("field_175167_bK", "lastReportedPosZ");
+        putMcpMember("field_175164_bL", "lastReportedYaw");
+        putMcpMember("field_175165_bM", "lastReportedPitch");
         putMcpMember("field_74311_E", "keyBindSneak");
         putMcpMember("field_74314_A", "keyBindJump");
         putMcpMember("field_74351_w", "keyBindForward");
@@ -290,6 +324,26 @@ public final class MappingTable {
         putMethod("func_70107_b", "b");   // setPosition
         putMethod("func_70016_h", "g");   // setVelocity
         putMethod("func_149439_c", "a");  // getMessage (C01PacketChatMessage)
+        putMethod("func_178890_a", "a");  // PlayerControllerMP.onPlayerRightClick (1.8.9)
+        putMethod("func_78765_a", "a");   // older PlayerControllerMP.onPlayerRightClick name
+        putMethod("func_78769_a", "a");   // PlayerControllerMP.sendUseItem
+        putMethod("func_180495_p", "p");  // World.getBlockState
+        putMethod("func_175623_d", "d");  // World.isAirBlock
+        putMethod("func_177230_c", "c");  // IBlockState.getBlock
+        putMethod("func_177958_n", "a");  // BlockPos.getX
+        putMethod("func_177956_o", "b");  // BlockPos.getY
+        putMethod("func_177952_p", "c");  // BlockPos.getZ
+        putMethod("func_178782_a", "a");  // MovingObjectPosition.getBlockPos
+        putMethod("func_77973_b", "b");   // ItemStack.getItem
+        putMethod("func_77976_d", "c");   // ItemStack.getMaxStackSize
+        putMethod("func_149464_c", "a");  // C03 getPositionX
+        putMethod("func_149467_d", "b");  // C03 getPositionY
+        putMethod("func_149472_e", "c");  // C03 getPositionZ
+        putMethod("func_149462_g", "d");  // C03 getYaw
+        putMethod("func_149470_h", "e");  // C03 getPitch
+        putMethod("func_149465_i", "f");  // C03 isOnGround
+        putMethod("func_149466_j", "g");  // C03 isMoving
+        putMethod("func_149463_k", "h");  // C03 isRotating
         putField("field_149440_a", "a");  // message (C01PacketChatMessage)
     }
 

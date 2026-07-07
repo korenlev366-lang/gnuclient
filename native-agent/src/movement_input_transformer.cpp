@@ -1,7 +1,9 @@
 #include "movement_input_transformer.h"
 #include "entity_player_transformer.h"
+#include "entity_living_base_transformer.h"
 #include "packet_transformer.h"
 #include "world_render_transformer.h"
+#include "gui_ingame_transformer.h"
 
 #include "jni_bridge.h"
 #include "jvmti_context.h"
@@ -118,8 +120,18 @@ void JNICALL on_class_file_load(jvmtiEnv* jvmti, JNIEnv* env, jclass, jobject,
     if (new_class_data && *new_class_data)
         return;
 
+    try_patch_gui_ingame(jvmti, env, name, class_data_len, class_data,
+                         new_class_data_len, new_class_data);
+    if (new_class_data && *new_class_data)
+        return;
+
     try_patch_entity_player_sp(jvmti, env, name, class_data_len, class_data,
                                new_class_data_len, new_class_data);
+    if (new_class_data && *new_class_data)
+        return;
+
+    try_patch_entity_living_base(jvmti, env, name, class_data_len, class_data,
+                                 new_class_data_len, new_class_data);
     if (new_class_data && *new_class_data)
         return;
 

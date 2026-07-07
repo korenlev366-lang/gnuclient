@@ -5,6 +5,7 @@ import gnu.client.module.Module;
 import gnu.client.module.ModuleManager;
 import gnu.client.module.modules.combat.AutoBlockModule;
 import gnu.client.module.modules.combat.WTapModule;
+import gnu.client.module.modules.player.ScaffoldModule;
 import gnu.client.runtime.mc.McAccess;
 
 /**
@@ -37,6 +38,11 @@ public final class SprintModule extends Module {
             return;
         if (WTapModule.shouldSuppressSprintKey()) {
             McAccess.setSprintKeyState(false);
+            return;
+        }
+        if (ScaffoldModule.shouldSuppressSprintKey()) {
+            McAccess.setSprintKeyState(false);
+            McAccess.setClientSprinting(player, false);
             return;
         }
         Module autoBlock = ModuleManager.INSTANCE.getModule("Auto Block");

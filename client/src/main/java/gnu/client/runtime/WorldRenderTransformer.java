@@ -44,16 +44,20 @@ public final class WorldRenderTransformer {
 
     // FreeLook hook constants
     private static final String FREE_LOOK_HOOK_OWNER = "gnu/client/runtime/FreeLookHook";
+    private static final String SPOOF_HOOK_OWNER = "gnu/client/runtime/ScaffoldItemSpoofHook";
     private static final String ENTITY_OWNER = "net/minecraft/entity/Entity";
 
     // SetAngles redirect constants (updateCameraAndRender)
     private static final String ENTITY_PLAYER_SP_OWNER = "net/minecraft/client/entity/EntityPlayerSP";
     private static final String METHOD_SET_ANGLES = "func_70082_c";
     private static final String METHOD_UPDATE_CAMERA_AND_RENDER = "func_181560_a";
+    private static final String METHOD_UPDATE_RENDERER = "func_78479_a";
 
     // SRG field names for rotation
     private static final String FIELD_ROTATION_YAW = "field_70177_z";
     private static final String FIELD_ROTATION_PITCH = "field_70125_A";
+    private static final String FIELD_PREV_ROTATION_YAW = "field_70126_B";
+    private static final String FIELD_PREV_ROTATION_PITCH = "field_70127_C";
 
     private WorldRenderTransformer() {}
 
@@ -68,6 +72,8 @@ public final class WorldRenderTransformer {
             boolean[] renderWorldPassPatched = new boolean[] { false };
             boolean[] orientCameraPatched = new boolean[] { false };
             boolean[] updateCameraAndRenderPatched = new boolean[] { false };
+            boolean[] updateRendererPatched = new boolean[] { false };
+            boolean[] itemSpoofPatched = new boolean[] { false };
             final int[] setAnglesReplaceCount = new int[] { 0 };
 
             ClassVisitor visitor = new ClassVisitor(Opcodes.ASM9, writer) {
@@ -90,7 +96,14 @@ public final class WorldRenderTransformer {
 
                     // ── updateCameraAndRender (func_181560_a): redirect setAngles calls ──
                     if (isUpdateCameraAndRender(name, desc)) {
-                        return injectSetAnglesRedirect(mv, updateCameraAndRenderPatched, setAnglesReplaceCount);
+                        return injectSlotSpoofLifecycle(
+                                injectSetAnglesRedirect(mv, updateCameraAndRenderPatched, setAnglesReplaceCount),
+                                itemSpoofPatched);
+                    }
+
+                    // ── updateRenderer (func_78479_a): scaffold item-spoof render swap ──
+                    if (isUpdateRenderer(name, desc)) {
+                        return injectSlotSpoofLifecycle(mv, updateRendererPatched);
                     }
 
                     return mv;
@@ -104,9 +117,14 @@ public final class WorldRenderTransformer {
             }
             if (updateCameraAndRenderPatched[0]) {
                 GnuLog.log("JAVA_ WorldRenderTransformer: patched updateCameraAndRender in " + className
-                        + " — replaced " + setAnglesReplaceCount[0] + " setAngles sites");
+                        + " — replaced " + setAnglesReplaceCount[0] + " setAngles sites"
+                        + ", itemSpoof=" + itemSpoofPatched[0]);
             }
-            if (!renderWorldPassPatched[0] && !orientCameraPatched[0] && !updateCameraAndRenderPatched[0]) {
+            if (updateRendererPatched[0]) {
+                GnuLog.log("JAVA_ WorldRenderTransformer: patched updateRenderer in " + className);
+            }
+            if (!renderWorldPassPatched[0] && !orientCameraPatched[0]
+                    && !updateCameraAndRenderPatched[0] && !updateRendererPatched[0]) {
                 GnuLog.log("JAVA_ WorldRenderTransformer: no patch for " + className);
                 return null;
             }
@@ -158,8 +176,33 @@ public final class WorldRenderTransformer {
         };
     }
 
+    private static MethodVisitor injectSlotSpoofLifecycle(MethodVisitor mv, boolean[] patched) {
+        return new MethodVisitor(Opcodes.ASM9, mv) {
+            private boolean headDone;
+
+            @Override
+            public void visitCode() {
+                super.visitCode();
+                if (headDone)
+                    return;
+                super.visitMethodInsn(Opcodes.INVOKESTATIC, SPOOF_HOOK_OWNER,
+                        "beginRenderSlotSpoof", "()V", false);
+                headDone = true;
+                patched[0] = true;
+            }
+
+            @Override
+            public void visitInsn(int opcode) {
+                if (opcode == Opcodes.RETURN) {
+                    super.visitMethodInsn(Opcodes.INVOKESTATIC, SPOOF_HOOK_OWNER,
+                            "endRenderSlotSpoof", "()V", false);
+                }
+                super.visitInsn(opcode);
+            }
+        };
+    }
+
     /**
-     * Transforms {@code updateCameraAndRender} (func_181560_a) by replacing every
      * INVOKEVIRTUAL of {@code EntityPlayerSP.func_70082_c(FF)V} (setAngles) with
      * INVOKESTATIC {@link FreeLookHook#dispatchSetAngles(Object, float, float)}.
      *
@@ -231,6 +274,24 @@ public final class WorldRenderTransformer {
                                 false);
                         patched[0] = true;
                         return;
+                    } else if (FIELD_PREV_ROTATION_YAW.equals(name)) {
+                        super.visitMethodInsn(
+                                Opcodes.INVOKESTATIC,
+                                FREE_LOOK_HOOK_OWNER,
+                                "redirectPrevYaw",
+                                "(Ljava/lang/Object;)F",
+                                false);
+                        patched[0] = true;
+                        return;
+                    } else if (FIELD_PREV_ROTATION_PITCH.equals(name)) {
+                        super.visitMethodInsn(
+                                Opcodes.INVOKESTATIC,
+                                FREE_LOOK_HOOK_OWNER,
+                                "redirectPrevPitch",
+                                "(Ljava/lang/Object;)F",
+                                false);
+                        patched[0] = true;
+                        return;
                     }
                 }
                 // All other field instructions pass through unchanged
@@ -253,6 +314,10 @@ public final class WorldRenderTransformer {
 
     private static boolean isUpdateCameraAndRender(String name, String desc) {
         return METHOD_UPDATE_CAMERA_AND_RENDER.equals(name) && "(FJ)V".equals(desc);
+    }
+
+    private static boolean isUpdateRenderer(String name, String desc) {
+        return METHOD_UPDATE_RENDERER.equals(name) && "()V".equals(desc);
     }
 
     private static final class SafeClassWriter extends ClassWriter {

@@ -30,10 +30,9 @@ import gnu.client.runtime.packet.PacketListener;
  * and passes them directly to {@link #applyCameraDelta(float, float)} which
  * replicates vanilla's internal: cameraYaw += dYaw * 0.15, cameraPitch -= dPitch * 0.15.
  *
- * <p>Module retains: perspective management (third-person enter/exit, FOV),
- * packet interceptor (outbound C03/C05/C06 yaw/pitch overwritten with real
- * rotation), hold-mode key handling, and {@code onRender} RenderManager
- * playerViewY/X override for entity billboard rendering.
+ * <p>Packet interceptor (priority 200) overwrites outbound C03/C05/C06 yaw/pitch with the
+ * player's real body rotation so freelook camera movement is silent to the server.
+ * The handler never cancels or queues packets — lag modules are unaffected.
  *
  * <p>Settings mirror Raven's Freelook: Hold, Invert pitch, Lock pitch,
  * Custom FOV. Default key = L (LWJGL 56).
@@ -209,6 +208,12 @@ public final class FreeLookModule extends Module implements PacketListener {
             return;
         }
 
+        if (McAccess.currentScreen(McAccess.getMinecraft()) != null && hold.getValue()) {
+            resetPerspective();
+            setEnabled(false);
+            return;
+        }
+
         // ── No mouseHelper delta reads/zeroing ──
         // Mouse delta is accumulated by dispatchSetAngles → applyCameraDelta
         // on the render thread. onTick only handles non-rotation upkeep.
@@ -244,6 +249,10 @@ public final class FreeLookModule extends Module implements PacketListener {
      * @param dPitch the per-frame pitch delta from setAngles (sensitivity-applied, invert done)
      */
     public void applyCameraDelta(float dYaw, float dPitch) {
+        if (invertPitch.getValue()) {
+            dPitch = -dPitch;
+        }
+
         // Replicate vanilla Entity.setAngles math exactly:
         // rotationYaw += yaw * 0.15, rotationPitch -= pitch * 0.15
         cameraYaw += dYaw * 0.15f;
@@ -255,15 +264,13 @@ public final class FreeLookModule extends Module implements PacketListener {
         }
     }
 
-    // ── Packet interceptor (prevents freelook rotation from leaking to server) ──
+    // ── Packet interceptor (silent rotation — real body yaw/pitch only) ──
     //
-    // Path B: player rotation is NEVER modified by freelook, so
-    // rotationYaw/rotationPitch always contain the real body direction.
-    // We read them live (no originalYaw needed — but we keep the intercept
-    // for safety, reading live from the player).
+    // Freelook camera angles are client-only. Player rotationYaw/rotationPitch stay
+    // frozen at the direction you faced when freelook started (or wherever another
+    // module like scaffold wrote them). Packets always carry that real rotation.
     //
-    // This also handles the case where another module modifies player rotation
-    // (e.g. aim assist) — the packet will carry the latest real direction.
+    // Never cancels or re-queues — lag/blink/backtrack modules are unaffected.
 
     @Override
     public int sendPriority() {
@@ -365,6 +372,12 @@ public final class FreeLookModule extends Module implements PacketListener {
 
     private void resetPerspective() {
         perspectiveToggled = false;
+
+        // Snap freelook camera back to the real body rotation so first-person
+        // returns to where you were looking before freelook (F5-style).
+        cameraYaw = getPlayerYaw();
+        cameraPitch = getPlayerPitch();
+
         applyThirdPersonView(previousPerspective);
 
         // Raven: grab mouse cursor if in-game and no screen

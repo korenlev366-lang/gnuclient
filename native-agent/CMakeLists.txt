@@ -28,8 +28,10 @@ set(AGENT_SOURCES
     src/imgui_gui.cpp
     src/movement_input_transformer.cpp
     src/entity_player_transformer.cpp
+    src/entity_living_base_transformer.cpp
     src/packet_transformer.cpp
     src/world_render_transformer.cpp
+    src/gui_ingame_transformer.cpp
 )
 
 add_library(gnu-agent SHARED ${AGENT_SOURCES} ${IMGUI_SOURCES})
