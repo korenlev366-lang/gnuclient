@@ -44,11 +44,14 @@ public final class PlayerUpdateHook {
         overrideActive = true;
     }
 
-    /** Silent yaw for movefix physics — prefer the rotation queued for this tick. */
+    /** Silent yaw for movefix physics — matches packet yaw ({@link RotationState#getSmoothedYaw()}). */
     public static float silentYawForMoveFix() {
+        if (RotationState.isActived())
+            return RotationState.getSmoothedYaw();
         if (overrideActive)
             return overrideYaw;
-        return RotationState.getSmoothedYaw();
+        Object player = McAccess.thePlayer();
+        return player != null ? McAccess.getYaw() : 0.0f;
     }
 
     public static float lastReportedYaw(Object player) {

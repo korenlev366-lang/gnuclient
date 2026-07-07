@@ -118,7 +118,6 @@ public final class ScaffoldModule extends Module implements PacketListener {
   private int startY = 256;
   private boolean shouldKeepY;
   private int targetFacing = -1;
-  private boolean ranPreUpdate;
   private int scaffoldCycleTick = -1;
   private int tellyTicksUntilJump;
   private int tellyAirTicks;
@@ -132,10 +131,23 @@ public final class ScaffoldModule extends Module implements PacketListener {
   private boolean cyclePrioritizePlacement;
   private boolean cycleAllowTellyAirPlacement;
   private float lastSentYaw = Float.MIN_VALUE;
+  /** Last silent yaw/pitch actually sent — used as smooth-rotation base (not lastReportedYaw). */
+  private float steppedServerYaw = Float.NaN;
+  private float steppedServerPitch = Float.NaN;
   private ScaffoldPlacement.BlockData pendingBlockData;
   private Object pendingHit;
   private boolean pendingPlace;
   private float lastSentPitch;
+  private float prevSentYaw = Float.MIN_VALUE;
+  private float prevSentPitch;
+  private float tickRotDeltaYaw;
+  private float tickRotDeltaPitch;
+  private float lastPlaceRotDeltaYaw = -1.0f;
+  private float lastPlaceRotDeltaPitch = -1.0f;
+  private float rotationTargetYaw;
+  private float rotationTargetPitch;
+  /** Cached bridge-facing yaw — avoids 45° bin flips from lastReportedYaw drift. */
+  private float cachedStableMoveFixYaw = Float.NaN;
   private int placementsThisTick;
   private boolean hasExactBlockAim;
 
@@ -151,7 +163,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
     blockSlot = -1;
     pendingServerSlot = -1;
     blockCount = -1;
-    rotationTick = 3;
+    rotationTick = 0;
     yaw = -180.0f;
     pitch = 0.0f;
     canRotate = false;
@@ -167,6 +179,9 @@ public final class ScaffoldModule extends Module implements PacketListener {
     tellyDoNotAimWasActive = false;
     tellyRotTransition = false;
     tellyForwardMoveFixSkip = false;
+    prevSentYaw = Float.MIN_VALUE;
+    lastPlaceRotDeltaYaw = -1.0f;
+    lastPlaceRotDeltaPitch = -1.0f;
     RotationState.reset();
     tellyTicksUntilJump = 0;
     tellyAirTicks = 0;
@@ -174,6 +189,9 @@ public final class ScaffoldModule extends Module implements PacketListener {
     tellyAwaitingPlacement = false;
     tellyWasOnGround = true;
     scaffoldCycleTick = -1;
+    steppedServerYaw = Float.NaN;
+    steppedServerPitch = Float.NaN;
+    cachedStableMoveFixYaw = Float.NaN;
     clearPendingPlacement();
     PacketEvents.register(this);
   }
@@ -195,10 +213,16 @@ public final class ScaffoldModule extends Module implements PacketListener {
     tellyDoNotAimWasActive = false;
     tellyRotTransition = false;
     tellyForwardMoveFixSkip = false;
+    prevSentYaw = Float.MIN_VALUE;
+    lastPlaceRotDeltaYaw = -1.0f;
+    lastPlaceRotDeltaPitch = -1.0f;
     tellyStraightJumpActive = false;
     tellyAwaitingPlacement = false;
     tellyWasOnGround = true;
     scaffoldCycleTick = -1;
+    steppedServerYaw = Float.NaN;
+    steppedServerPitch = Float.NaN;
+    cachedStableMoveFixYaw = Float.NaN;
     RotationState.reset();
     clearPendingPlacement();
     resetTowerState();
@@ -208,11 +232,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
 
   @Override
   public void onTick() {
-    if (ranPreUpdate) {
-      ranPreUpdate = false;
-      return;
-    }
-    runScaffoldCycle(false);
+    // Scaffold runs from PlayerUpdateHook.onPreUpdate (before walking packets).
   }
 
   private void runScaffoldCycle(boolean deferPlacement) {
@@ -222,6 +242,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
       forceJump = false;
       clearPendingPlacement();
       clearRotationState();
+      resetSteppedRotation();
       RotationState.applyState(false, 0.0f, 0.0f, 0.0f, -1);
       return;
     }
@@ -234,6 +255,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
       forceJump = false;
       clearPendingPlacement();
       clearRotationState();
+      resetSteppedRotation();
       RotationState.applyState(false, 0.0f, 0.0f, 0.0f, -1);
       return;
     }
@@ -256,7 +278,6 @@ public final class ScaffoldModule extends Module implements PacketListener {
     guardClientHotbarSlot(player);
     updateBlockSlot(player);
     updateTelly(player);
-    applySafeWalk(player, world);
     applyTower(player, world);
     boolean towerJump = isTowerJumpActive(player);
     boolean tellyDoNotAim = !towerJump && isTellyDoNotAim(player);
@@ -266,24 +287,18 @@ public final class ScaffoldModule extends Module implements PacketListener {
     cycleAllowTellyAirPlacement = allowTellyAirPlacement;
     if (telly.getValue() && tellyDoNotAim != tellyDoNotAimWasActive) {
       tellyRotTransition = true;
-      if (tellyDoNotAim) {
+      if (tellyDoNotAim)
         rotationTick = Math.max(rotationTick, 1);
-      } else {
-        // Straight window ended — snap block aim and place same tick.
-        tellyRotTransition = false;
+      else if (!shouldSmoothRotation())
         rotationTick = 0;
-      }
     }
     tellyDoNotAimWasActive = tellyDoNotAim;
     tellyDoNotAimActive = tellyDoNotAim;
-    tellyForwardMoveFixSkip = isTellyForwardLookWindow(player, tellyDoNotAim);
+    tellyForwardMoveFixSkip = false;
     if (tellyDoNotAim && !allowTellyAirPlacement)
       prepareTellyRotation(player);
     else
       prepareBaseRotation(player);
-
-    if (!towerJump && (!tellyDoNotAim || allowTellyAirPlacement))
-      snapMovementFacingYaw(player);
 
     ScaffoldPlacement.BlockData blockData = ScaffoldPlacement.getBlockData(player, world, startY, stage, shouldKeepY);
     ScaffoldPlacement.AimData aimData = null;
@@ -298,7 +313,12 @@ public final class ScaffoldModule extends Module implements PacketListener {
       }
     }
 
+    // OpenMyau parity: snap after block aim so movement-facing yaw wins over precise aim.
+    if (!towerJump && (!tellyDoNotAim || allowTellyAirPlacement))
+      snapMovementFacingYaw(player);
+
     applyRotation(player);
+    applySafeWalk(player, world);
 
     queuePlacement(player, blockData, towerJump, aimData, deferPlacement, prioritizePlacement,
         allowTellyAirPlacement);
@@ -321,11 +341,9 @@ public final class ScaffoldModule extends Module implements PacketListener {
                               boolean towerJump, ScaffoldPlacement.AimData aimData,
                               boolean deferPlacement, boolean prioritizePlacement,
                               boolean allowTellyAirPlacement) {
-    boolean rotationPlacementDelay = (rotationTick > 0 || (tellyRotTransition && tellyDoNotAimActive))
-        && !towerJump;
-    if (rotationPlacementDelay && (prioritizePlacement || allowTellyAirPlacement))
-      rotationPlacementDelay = false;
-    if (telly.getValue() && !McAccess.isOnGround() && isTellyMoving() && !isTowering(player))
+    boolean rotationPlacementDelay = rotationSyncActive();
+    // Tower snaps rotation instantly — keep placing every jump tick.
+    if (towerJump)
       rotationPlacementDelay = false;
 
     if (blockData == null || !canPlaceThisTick(player, towerJump, allowTellyAirPlacement)
@@ -366,7 +384,6 @@ public final class ScaffoldModule extends Module implements PacketListener {
   private void preUpdate(Object player) {
     if (player == null)
       return;
-    ranPreUpdate = true;
     runScaffoldCycle(true);
   }
 
@@ -727,39 +744,68 @@ public final class ScaffoldModule extends Module implements PacketListener {
     lastSentYaw = Float.MIN_VALUE;
   }
 
+  private void resetSteppedRotation() {
+    steppedServerYaw = Float.NaN;
+    steppedServerPitch = Float.NaN;
+  }
+
+  private float rotationBaseYaw(Object player) {
+    if (!Float.isNaN(steppedServerYaw))
+      return steppedServerYaw;
+    return PlayerUpdateHook.lastReportedYaw(player);
+  }
+
+  private float rotationBasePitch(Object player) {
+    if (!Float.isNaN(steppedServerPitch))
+      return steppedServerPitch;
+    return PlayerUpdateHook.lastReportedPitch(player);
+  }
+
   /**
    * OpenMyau parity: snap backwards/sideways preset yaw only when block aim is within 90°
    * of the movement-facing preset.
    */
   private void snapMovementFacingYaw(Object player) {
-    if (!canRotate || !isForwardPressed())
+    Float movementYaw = movementFacingYawIfAligned(player);
+    if (movementYaw == null)
       return;
+    yaw = movementYaw;
+  }
+
+  /**
+   * Movement-facing packet yaw when block aim is aligned (OpenMyau backwards/sideways only).
+   * Returns null when block aim is too far from bridge preset.
+   */
+  private Float movementFacingYawIfAligned(Object player) {
+    if (player == null || moveFix.getValue() != MOVEFIX_SILENT || !isForwardPressed())
+      return null;
+    if (isTowerJumpActive(player) || !canRotate)
+      return null;
+    if (tellyDoNotAimActive && telly.getValue())
+      return null;
+
+    int mode = rotationMode.getValue();
+    if (mode != ROT_BACKWARDS && mode != ROT_SIDEWAYS)
+      return null;
 
     float currentYaw = currentMoveYaw(player);
-    float reportedYaw = PlayerUpdateHook.lastReportedYaw(player);
-    float yawDiffTo180 = wrapTo(currentYaw - 180.0f, reportedYaw);
+    float cameraYaw = McAccess.getYaw();
+    float yawDiffTo180 = wrapTo(currentYaw - 180.0f, cameraYaw);
+    if (Math.abs(ScaffoldPlacement.wrapAngle(yawDiffTo180 - yaw)) >= 90.0f)
+      return null;
+
     float diagonalYaw = isDiagonal(currentYaw)
         ? yawDiffTo180
         : wrapTo(currentYaw - 135.0f * (((currentYaw + 180.0f) % 90.0f) < 45.0f ? 1.0f : -1.0f),
-            reportedYaw);
-
-    if (Math.abs(ScaffoldPlacement.wrapAngle(yawDiffTo180 - yaw)) >= 90.0f)
-      return;
-
-    switch (rotationMode.getValue()) {
-      case ROT_BACKWARDS:
-        yaw = ScaffoldPlacement.quantize(yawDiffTo180);
-        break;
-      case ROT_SIDEWAYS:
-        yaw = ScaffoldPlacement.quantize(diagonalYaw);
-        break;
-      default:
-        break;
-    }
+            cameraYaw);
+    if (mode == ROT_BACKWARDS)
+      return ScaffoldPlacement.quantize(yawDiffTo180);
+    return ScaffoldPlacement.quantize(diagonalYaw);
   }
 
   private void applyRotation(Object player) {
     if (rotationMode.getValue() == ROT_NONE) {
+      resetSteppedRotation();
       RotationState.applyState(false, 0.0f, 0.0f, 0.0f, -1);
       lastSentYaw = Float.MIN_VALUE;
       return;
@@ -780,35 +826,24 @@ public final class ScaffoldModule extends Module implements PacketListener {
   }
 
   private void applyNormalRotation(Object player) {
-    float reportedYaw = PlayerUpdateHook.lastReportedYaw(player);
-    float reportedPitch = PlayerUpdateHook.lastReportedPitch(player);
+    float baseYaw = rotationBaseYaw(player);
+    float basePitch = rotationBasePitch(player);
     float targetYaw = yaw;
     float targetPitch = pitch;
 
-    if (cyclePrioritizePlacement || cycleAllowTellyAirPlacement || hasExactBlockAim) {
-      tellyRotTransition = false;
-      sendSilentRotation(targetYaw, targetPitch);
-      return;
-    }
-
-    if (useTellyTransitionRotation()) {
+    if (cyclePrioritizePlacement || cycleAllowTellyAirPlacement) {
+      sendTargetRotation(baseYaw, basePitch, targetYaw, targetPitch);
+    } else if (useTellyTransitionRotation()) {
       sendTellyTransitionRotation(player, targetYaw, targetPitch);
       return;
-    }
-
-    if (rotationMode.getValue() == ROT_SMOOTH) {
-      sendSilentRotation(
-          smoothYaw(reportedYaw, targetYaw),
-          smoothPitch(reportedPitch, targetPitch));
     } else {
-      sendSilentRotation(targetYaw, targetPitch);
+      sendTargetRotation(baseYaw, basePitch, targetYaw, targetPitch);
     }
+    updateTellyRotTransition(targetYaw, targetPitch);
   }
 
   /** Downward silent rotation while jump-towering (LiquidBounce aimOnTower / OpenMyau isTowering). */
   private void applyTowerRotation(Object player) {
-    float reportedYaw = PlayerUpdateHook.lastReportedYaw(player);
-    float reportedPitch = PlayerUpdateHook.lastReportedPitch(player);
     float targetYaw = canRotate ? yaw : ScaffoldPlacement.quantize(currentMoveYaw(player));
     float targetPitch = canRotate ? pitch : 85.0f;
     if (targetPitch < 75.0f)
@@ -816,13 +851,8 @@ public final class ScaffoldModule extends Module implements PacketListener {
     targetYaw = ScaffoldPlacement.quantize(targetYaw);
     targetPitch = ScaffoldPlacement.quantize(targetPitch);
 
-    if (rotationMode.getValue() == ROT_SMOOTH) {
-      sendSilentRotation(
-          smoothYaw(reportedYaw, targetYaw),
-          smoothPitch(reportedPitch, targetPitch));
-    } else {
-      sendSilentRotation(targetYaw, targetPitch);
-    }
+    // Tower always snaps — slow pitch stepping breaks jump placement.
+    sendSilentRotation(targetYaw, targetPitch, targetYaw, targetPitch);
     towering = true;
   }
 
@@ -832,46 +862,180 @@ public final class ScaffoldModule extends Module implements PacketListener {
 
   /** Smooth rotation between backwards block aim and telly straight forward look. */
   private void sendTellyTransitionRotation(Object player, float targetYaw, float targetPitch) {
-    float reportedYaw = PlayerUpdateHook.lastReportedYaw(player);
-    float reportedPitch = PlayerUpdateHook.lastReportedPitch(player);
-    float sentYaw = smoothYaw(reportedYaw, targetYaw);
-    float sentPitch = smoothPitch(reportedPitch, targetPitch);
-    sendSilentRotation(sentYaw, sentPitch);
+    sendTargetRotation(rotationBaseYaw(player), rotationBasePitch(player), targetYaw, targetPitch);
+    updateTellyRotTransition(targetYaw, targetPitch);
+  }
 
-    float yawRemaining = Math.abs(ScaffoldPlacement.wrapAngle(targetYaw - sentYaw));
-    float pitchRemaining = Math.abs(targetPitch - sentPitch);
-    if (yawRemaining > 1.0f || pitchRemaining > 1.0f) {
-      rotationTick = Math.max(rotationTick, 1);
-      tellyRotTransition = true;
-    } else if (!tellyDoNotAimActive) {
+  private void updateTellyRotTransition(float targetYaw, float targetPitch) {
+    if (!telly.getValue()) {
       tellyRotTransition = false;
+      return;
+    }
+    tellyRotTransition = tellyDoNotAimActive
+        && rotationIncomplete(lastSentYaw, lastSentPitch, targetYaw, targetPitch);
+  }
+
+  private void sendTargetRotation(float baseYaw, float basePitch,
+                                  float targetYaw, float targetPitch) {
+    Object player = McAccess.thePlayer();
+    float effectiveTargetYaw = targetYaw;
+    float effectiveTargetPitch = targetPitch;
+    boolean instant = false;
+    if (usesAlignedMovingMoveFix(player)) {
+      effectiveTargetYaw = stableMoveFixYaw(player);
+      effectiveTargetPitch = bridgePlacementPitch();
+      instant = true;
+    } else {
+      Float movementYaw = movementFacingYawIfAligned(player);
+      if (movementYaw != null) {
+        effectiveTargetYaw = movementYaw;
+        instant = true;
+      }
+    }
+    if (shouldSmoothRotation() && !instant) {
+      sendSilentRotation(
+          smoothYaw(baseYaw, effectiveTargetYaw),
+          smoothPitch(basePitch, effectiveTargetPitch),
+          effectiveTargetYaw,
+          effectiveTargetPitch);
+    } else {
+      sendSilentRotation(effectiveTargetYaw, effectiveTargetPitch, effectiveTargetYaw, effectiveTargetPitch);
     }
   }
 
+  /** Scaffold bridge pitch — must match packet pitch while using movement-facing yaw. */
+  private static final float BRIDGE_PLACE_PITCH = 85.0f;
+
+  private float bridgePlacementPitch() {
+    return ScaffoldPlacement.quantize(BRIDGE_PLACE_PITCH);
+  }
+
+  /** Stable movement-facing packet + strict placement (OpenMyau backwards/sideways aligned). */
+  private boolean usesAlignedMovingMoveFix(Object player) {
+    return usesMovingMoveFix(player) && movementFacingYawIfAligned(player) != null;
+  }
+
+  /** Silent move-fix while keys are held. */
+  private boolean usesMovingMoveFix(Object player) {
+    return player != null
+        && moveFix.getValue() == MOVEFIX_SILENT
+        && isForwardPressed()
+        && rotationMode.getValue() != ROT_NONE;
+  }
+
   private void sendSilentRotation(float sentYaw, float sentPitch) {
+    sendSilentRotation(sentYaw, sentPitch, sentYaw, sentPitch);
+  }
+
+  /**
+   * Silent rotation for the server. With move-fix while moving, yaw snaps to movement-facing
+   * when block aim is aligned (OpenMyau); packet and physics share the same yaw (Grim Simulation).
+   */
+  private void sendSilentRotation(float sentYaw, float sentPitch, float targetYaw, float targetPitch) {
     PlayerUpdateHook.requestRotation(sentYaw, sentPitch);
+    if (prevSentYaw != Float.MIN_VALUE) {
+      tickRotDeltaYaw = Math.abs(ScaffoldPlacement.wrapAngle(sentYaw - prevSentYaw));
+      tickRotDeltaPitch = Math.abs(sentPitch - prevSentPitch);
+    } else {
+      tickRotDeltaYaw = 0.0f;
+      tickRotDeltaPitch = 0.0f;
+    }
+    prevSentYaw = sentYaw;
+    prevSentPitch = sentPitch;
+    rotationTargetYaw = targetYaw;
+    rotationTargetPitch = targetPitch;
     lastSentYaw = sentYaw;
     lastSentPitch = sentPitch;
+    steppedServerYaw = sentYaw;
+    steppedServerPitch = sentPitch;
     boolean moveFixEnabled = moveFix.getValue() == MOVEFIX_SILENT;
-    float moveFixYaw = moveFixEnabled ? sentYaw : McAccess.getYaw();
     RotationState.applyState(
         true,
         sentYaw,
         sentPitch,
-        moveFixYaw,
+        sentYaw,
         moveFixEnabled ? (int) ROTATION_PRIORITY : -1);
+    updateRotationDelay(sentYaw, sentPitch, targetYaw, targetPitch);
+  }
+
+  /**
+   * Stable bridge-facing yaw for move-fix. Anchored to camera (not lastReportedYaw) so
+   * stepped silent rotations do not shift the 45° quantization bin tick-by-tick.
+   */
+  private float stableMoveFixYaw(Object player) {
+    if (telly.getValue() && tellyDoNotAimActive)
+      return tellyForwardMoveFixYaw(player);
+    if (rotationMode.getValue() == ROT_NONE || isTowerJumpActive(player))
+      return McAccess.getYaw();
+
+    float moveYaw = currentMoveYaw(player);
+    float cameraYaw = McAccess.getYaw();
+    float yawDiffTo180 = wrapTo(moveYaw - 180.0f, cameraYaw);
+    float diagonalYaw = isDiagonal(moveYaw)
+        ? yawDiffTo180
+        : wrapTo(moveYaw - 135.0f * (((moveYaw + 180.0f) % 90.0f) < 45.0f ? 1.0f : -1.0f),
+            cameraYaw);
+
+    float preset;
+    switch (rotationMode.getValue()) {
+      case ROT_DEFAULT:
+      case ROT_SIDEWAYS:
+      case ROT_SMOOTH:
+        preset = diagonalYaw;
+        break;
+      case ROT_BACKWARDS:
+        preset = yawDiffTo180;
+        break;
+      case ROT_GODBRIDGE:
+        preset = Math.round(moveYaw / 45.0f) * 45.0f;
+        break;
+      default:
+        return McAccess.getYaw();
+    }
+
+    float quantized = ScaffoldPlacement.quantize(preset);
+    if (!Float.isNaN(cachedStableMoveFixYaw)
+        && Math.abs(ScaffoldPlacement.wrapAngle(quantized - cachedStableMoveFixYaw)) < 22.5f) {
+      return cachedStableMoveFixYaw;
+    }
+    cachedStableMoveFixYaw = quantized;
+    return cachedStableMoveFixYaw;
+  }
+
+  private float tellyForwardMoveFixYaw(Object player) {
+    if (tellyResetMode.getValue() == TELLY_REVERSE)
+      return ScaffoldPlacement.quantize(Math.round(McAccess.getYaw() / 45.0f) * 45.0f);
+    return ScaffoldPlacement.quantize(currentMoveYaw(player));
+  }
+
+  /** Hold placement until stepped rotation reaches the target (Grim RotationPlace). */
+  private void updateRotationDelay(float sentYaw, float sentPitch, float targetYaw, float targetPitch) {
+    if (!shouldSmoothRotation())
+      return;
+    if (rotationIncomplete(sentYaw, sentPitch, targetYaw, targetPitch))
+      rotationTick = Math.max(rotationTick, 1);
   }
 
   private Object resolvePlacementHit(Object player, ScaffoldPlacement.BlockData blockData,
                                      boolean towerJump, ScaffoldPlacement.AimData aimData) {
     if (blockData == null || player == null)
       return null;
-    if (aimData != null && aimData.hitVec != null)
+    Object hit = validatedPlacementHit(player, blockData.blockPos, blockData.faceOrdinal);
+    if (hit != null)
+      return hit;
+    if (usesAlignedMovingMoveFix(player) && lastSentYaw != Float.MIN_VALUE) {
+      return ScaffoldPlacement.findPlacementHit(
+          player, blockData, lastSentYaw, bridgePlacementPitch());
+    }
+    if (!usesAlignedMovingMoveFix(player)
+        && !rotationSyncActive()
+        && aimData != null
+        && aimData.hitVec != null)
       return aimData.hitVec;
-    return validatedPlacementHit(player, blockData.blockPos, blockData.faceOrdinal);
+    return null;
   }
 
-  /** Raycast at the rotation that will be sent with the placement packet (Grim RotationPlace). */
+  /** Raycast at the rotation sent in C03 — Grim RotationPlace checks this vector. */
   private Object validatedPlacementHit(Object player, Object blockPos, int faceOrdinal) {
     if (player == null || blockPos == null)
       return null;
@@ -886,8 +1050,11 @@ public final class ScaffoldModule extends Module implements PacketListener {
       yaw = lastSentYaw;
       pitch = lastSentPitch;
     }
-    return ScaffoldPlacement.findPlacementHit(player,
-        new ScaffoldPlacement.BlockData(blockPos, faceOrdinal), yaw, pitch);
+    ScaffoldPlacement.BlockData data = new ScaffoldPlacement.BlockData(blockPos, faceOrdinal);
+    Object hit = ScaffoldPlacement.findPlacementHit(player, data, yaw, pitch);
+    if (hit == null && usesAlignedMovingMoveFix(player))
+      hit = ScaffoldPlacement.findPlacementHit(player, data, yaw, bridgePlacementPitch());
+    return hit;
   }
 
   private boolean canPlaceThisTick(Object player, boolean towerJump, boolean allowTellyAirPlacement) {
@@ -913,6 +1080,8 @@ public final class ScaffoldModule extends Module implements PacketListener {
   private boolean tryPlace(Object player, Object blockPos, int faceOrdinal, Object preferredHit) {
     if (blockPos == null || player == null)
       return false;
+    if (shouldBlockDuplicateRotPlace())
+      return false;
     flushPendingServerSlot(player);
     Object stack = getPlacementStack(player);
     if (!isPlaceableStack(stack) || McAccess.getStackSize(stack) < 1)
@@ -927,8 +1096,10 @@ public final class ScaffoldModule extends Module implements PacketListener {
     if (!ScaffoldPlacement.isPlacementTargetClear(world, blockPos, faceOrdinal))
       return false;
     Object hitVec = validatedPlacementHit(player, blockPos, faceOrdinal);
-    if (hitVec == null)
-      hitVec = preferredHit;
+    if (hitVec == null && !usesAlignedMovingMoveFix(player) && !rotationSyncActive()) {
+      if (preferredHit != null)
+        hitVec = preferredHit;
+    }
     if (hitVec == null)
       return false;
     Object facing = ScaffoldPlacement.enumFacing(faceOrdinal);
@@ -943,6 +1114,8 @@ public final class ScaffoldModule extends Module implements PacketListener {
       McAccess.swingItem();
     if (placed) {
       placementsThisTick++;
+      lastPlaceRotDeltaYaw = tickRotDeltaYaw;
+      lastPlaceRotDeltaPitch = tickRotDeltaPitch;
       blockCount--;
       Object held = getPlacementStack(player);
       int heldCount = isPlaceableStack(held) ? McAccess.getStackSize(held) : 0;
@@ -1557,6 +1730,57 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return Math.max(0, Math.round(tellyJumpTicks.getValue()));
   }
 
+  private boolean shouldSmoothRotation() {
+    return rotationMode.getValue() != ROT_NONE && rotationSpeed.getValue() < 179.5f;
+  }
+
+  private boolean rotationIncomplete(float sentYaw, float sentPitch,
+                                     float targetYaw, float targetPitch) {
+    if (sentYaw == Float.MIN_VALUE)
+      return true;
+    float yawRemaining = Math.abs(ScaffoldPlacement.wrapAngle(targetYaw - sentYaw));
+    float pitchRemaining = Math.abs(targetPitch - sentPitch);
+    return yawRemaining > 1.0f || pitchRemaining > 1.0f;
+  }
+
+  /** Exposed for movement input — rotation sync only gates placement, not fixStrafe. */
+  public boolean isRotationSyncing() {
+    return rotationSyncActive();
+  }
+
+  /** Grim DuplicateRotPlace — skip placing on identical repeated rotation deltas while stepping. */
+  private boolean shouldBlockDuplicateRotPlace() {
+    if (!rotationSyncActive())
+      return false;
+    if (tickRotDeltaYaw > 2.0f && lastPlaceRotDeltaYaw > 2.0f
+        && Math.abs(tickRotDeltaYaw - lastPlaceRotDeltaYaw) < 0.0001f)
+      return true;
+    if (tickRotDeltaPitch > 2.0f && lastPlaceRotDeltaPitch > 2.0f
+        && Math.abs(tickRotDeltaPitch - lastPlaceRotDeltaPitch) < 0.0001f)
+      return true;
+    return false;
+  }
+
+  /** True while server rotation is still catching up to the tick's rotation target. */
+  private boolean rotationSyncActive() {
+    if (!shouldSmoothRotation())
+      return false;
+    if (lastSentYaw == Float.MIN_VALUE)
+      return false;
+    if (rotationTick > 0)
+      return true;
+    if (tellyRotTransition)
+      return true;
+    Object player = McAccess.thePlayer();
+    if (usesAlignedMovingMoveFix(player))
+      return false;
+    return rotationIncomplete(lastSentYaw, lastSentPitch, rotationTargetYaw, rotationTargetPitch);
+  }
+
+  private float rotationStepDegrees() {
+    return Math.max(0.05f, rotationSpeed.getValue());
+  }
+
   private float smoothYaw(float current, float target) {
     return ScaffoldPlacement.quantize(current + cappedDelta(ScaffoldPlacement.wrapAngle(target - current)));
   }
@@ -1567,7 +1791,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
   }
 
   private float cappedDelta(float delta) {
-    float maxStep = Math.max(1.0f, rotationSpeed.getValue());
+    float maxStep = rotationStepDegrees();
     if (Math.abs(delta) <= maxStep)
       return delta;
     return Math.signum(delta) * maxStep;

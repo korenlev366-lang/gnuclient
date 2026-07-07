@@ -2,7 +2,7 @@ package gnu.client.runtime;
 
 /**
  * OpenMyau {@code RotationState} — tracks silent rotation activation and the yaw
- * used by scaffold movefix ({@code getSmoothedYaw}).
+ * sent in C03 / used by movefix ({@code getSmoothedYaw}).
  */
 public final class RotationState {
 
