@@ -344,6 +344,7 @@ bool JniBridge::load_native_bootstrap(JNIEnv* env) {
     mid_set_float_ = sm("guiSettingFloat", "(II)F");
     mid_set_min_ = sm("guiSettingMin", "(II)F");
     mid_set_max_ = sm("guiSettingMax", "(II)F");
+    mid_set_step_ = sm("guiSettingStep", "(II)F");
     mid_set_float_w_ = sm("guiSetFloat", "(IIF)V");
     mid_set_mode_ = sm("guiSettingMode", "(II)I");
     mid_set_mode_count_ = sm("guiSettingModeCount", "(II)I");
@@ -549,6 +550,13 @@ float JniBridge::gui_setting_max(JNIEnv* env, int i, int s) {
     if (!cls_ || !mid_set_max_) return 1.0f;
     jfloat v = env->CallStaticFloatMethod(cls_, mid_set_max_, i, s);
     if (env->ExceptionCheck()) { env->ExceptionClear(); return 1.0f; }
+    return v;
+}
+
+float JniBridge::gui_setting_step(JNIEnv* env, int i, int s) {
+    if (!cls_ || !mid_set_step_) return 0.0f;
+    jfloat v = env->CallStaticFloatMethod(cls_, mid_set_step_, i, s);
+    if (env->ExceptionCheck()) { env->ExceptionClear(); return 0.0f; }
     return v;
 }
 

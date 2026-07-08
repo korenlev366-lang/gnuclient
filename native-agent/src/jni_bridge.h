@@ -68,6 +68,7 @@ public:
     float gui_setting_float(JNIEnv* env, int i, int s);
     float gui_setting_min(JNIEnv* env, int i, int s);
     float gui_setting_max(JNIEnv* env, int i, int s);
+    float gui_setting_step(JNIEnv* env, int i, int s);
     void gui_set_float(JNIEnv* env, int i, int s, float v);
 
     int gui_setting_mode(JNIEnv* env, int i, int s);
@@ -120,6 +121,7 @@ private:
     jmethodID mid_set_float_ = nullptr;
     jmethodID mid_set_min_ = nullptr;
     jmethodID mid_set_max_ = nullptr;
+    jmethodID mid_set_step_ = nullptr;
     jmethodID mid_set_float_w_ = nullptr;
     jmethodID mid_set_mode_ = nullptr;
     jmethodID mid_set_mode_count_ = nullptr;

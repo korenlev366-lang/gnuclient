@@ -13,7 +13,7 @@ import gnu.client.runtime.mc.McAccess;
 public final class TimerModule extends Module {
 
     private final SliderSetting speed =
-            addSetting(new SliderSetting("Speed", 1.0f, 0.1f, 2.0f));
+            addSetting(new SliderSetting("Speed", 1.0f, 0.0f, 2.0f, 0.01f));
 
     public TimerModule() {
         super("Timer", "Change game tick speed", Category.PLAYER);
@@ -54,6 +54,6 @@ public final class TimerModule extends Module {
 
     @Override
     public String[] getSuffix() {
-        return new String[]{String.format("%.1fx", speed.getValue())};
+        return new String[]{String.format("%.2fx", speed.getValue())};
     }
 }

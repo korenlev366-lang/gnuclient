@@ -169,7 +169,7 @@ void apply_style() {
 struct SettingMeta {
     std::string name;
     int type = 0; // 0 bool, 1 slider, 2 mode
-    float min = 0.0f, max = 1.0f;
+    float min = 0.0f, max = 1.0f, step = 0.0f;
     std::vector<std::string> mode_names;
 };
 struct ModuleMeta {
@@ -304,6 +304,7 @@ void build_meta(JNIEnv* env) {
             if (sm.type == 1) {
                 sm.min = b.gui_setting_min(env, i, s);
                 sm.max = b.gui_setting_max(env, i, s);
+                sm.step = b.gui_setting_step(env, i, s);
             } else if (sm.type == 2) {
                 int mc = b.gui_setting_mode_count(env, i, s);
                 for (int mi = 0; mi < mc; ++mi)
@@ -319,9 +320,17 @@ void build_meta(JNIEnv* env) {
 
 // ===================== custom widgets =====================
 
+static float snap_slider(float v, float mn, float mx, float step) {
+    v = clampf(v, mn, mx);
+    if (step <= 0.0f)
+        return v;
+    v = mn + std::round((v - mn) / step) * step;
+    return clampf(v, mn, mx);
+}
+
 // Thin accent slider with a rounded cap (Timewarp look, no boxy grab).
 bool custom_slider(const char* id, float x, float y, float w, float& val,
-                   float mn, float mx) {
+                   float mn, float mx, float step = 0.0f) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImGui::SetCursorScreenPos(ImVec2(x, y));
     ImGui::InvisibleButton(id, ImVec2(w, 14.0f));
@@ -337,7 +346,7 @@ bool custom_slider(const char* id, float x, float y, float w, float& val,
     if (active) {
         float mxp = ImGui::GetIO().MousePos.x;
         float nf = clampf((mxp - x) / w, 0.0f, 1.0f);
-        float nv = mn + nf * (mx - mn);
+        float nv = snap_slider(mn + nf * (mx - mn), mn, mx, step);
         if (nv != val) { val = nv; changed = true; }
     }
     return changed;
@@ -470,7 +479,7 @@ void render_card(JNIEnv* env, JniBridge& b, int mod, ImVec2 pos, float w,
             float vw = text_w(g_font_regular, SZ_VALUE, buf);
             dl->AddText(g_font_regular, SZ_VALUE, ImVec2(x + cw - vw, y + 1.0f),
                         U(TEXT_GRAY), buf);
-            if (custom_slider("##s", x, y + 20.0f, cw, v, sm.min, sm.max))
+            if (custom_slider("##s", x, y + 20.0f, cw, v, sm.min, sm.max, sm.step))
                 b.gui_set_float(env, mod, s, v);
             y += 42.0f;
         } else if (sm.type == 2) {

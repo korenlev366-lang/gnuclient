@@ -590,6 +590,11 @@ public final class NativeBootstrap {
         return set instanceof SliderSetting ? ((SliderSetting) set).getMax() : 1.0f;
     }
 
+    public static float guiSettingStep(int i, int s) {
+        Setting<?> set = setting(i, s);
+        return set instanceof SliderSetting ? ((SliderSetting) set).getStep() : 0.0f;
+    }
+
     public static void guiSetFloat(int i, int s, float v) {
         Setting<?> set = setting(i, s);
         if (set instanceof SliderSetting) {
