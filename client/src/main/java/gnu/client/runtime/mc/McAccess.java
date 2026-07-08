@@ -6,7 +6,9 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import gnu.client.module.modules.combat.AntiBotModule;
+import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.combat.RavenAntiBot;
+import gnu.client.runtime.AuraCombatPacketGuard;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -567,6 +569,14 @@ public final class McAccess {
 
     /** {@code PlayerControllerMP.attackEntity} — sends C02 ATTACK to server. */
     public static boolean attackEntity(Object target) {
+        return attackEntity(target, true);
+    }
+
+    /**
+     * Attack through {@code PlayerControllerMP.attackEntity} (runs
+     * {@code attackTargetEntityWithCurrentItem} — sprint slow, etc.).
+     */
+    public static boolean attackEntity(Object target, boolean swing) {
         Object player = thePlayer();
         Object controller = playerController();
         if (player == null || controller == null || target == null)
@@ -576,13 +586,31 @@ public final class McAccess {
             Class<?> entityCls = gameClass("net.minecraft.entity.Entity");
             if (playerCls == null || entityCls == null)
                 return false;
+            if (swing)
+                invoke(player, "func_71038_i", new Class<?>[0]);
             invoke(controller, "func_78764_a", new Class<?>[] { playerCls, entityCls }, player, target);
-            invoke(player, "func_71038_i", new Class<?>[0]);
             return true;
         } catch (Throwable t) {
             GnuLog.log("JAVA_ McAccess attackEntity error: " + t);
             return false;
         }
+    }
+
+    /**
+     * When the server was packet-sprinting ({@code lastSprinting}) but client
+     * {@code isSprinting()} was false, vanilla skips the 0.6× slow. Apply it once
+     * after {@link #attackEntity} so Grim AttackSlow matches — without forcing sprint on.
+     */
+    public static void reconcileVanillaAttackSlowdown(Object player,
+            boolean wasClientSprinting, boolean wasServerSprinting) {
+        if (player == null || !wasServerSprinting || wasClientSprinting)
+            return;
+        double mx = getDouble(player, "field_70159_w");
+        double mz = getDouble(player, "field_70179_y");
+        setDouble(player, "field_70159_w", mx * 0.6);
+        setDouble(player, "field_70179_y", mz * 0.6);
+        // Sprint STOP is sent once by vanilla onUpdateWalkingPlayer — never inject C0B here
+        // (reconcile STOP + vanilla STOP = Grim BadPacketsX; bypassed PacketEvents before).
     }
 
     /** Read all player names currently in the tab list (playerInfoMap -> GameProfile -> name). */
@@ -1758,6 +1786,8 @@ public final class McAccess {
     public static void setClientSprinting(Object player, boolean sprinting) {
         if (player == null)
             return;
+        if (sprinting && KillAuraModule.shouldSuppressSprintRestart())
+            return;
         invoke(player, "func_70031_b", new Class<?>[] { boolean.class }, sprinting);
     }
 
@@ -1781,6 +1811,8 @@ public final class McAccess {
     public static void sendSprintActionPacket(Object player, boolean startSprinting) {
         if (player == null)
             return;
+        if (startSprinting && KillAuraModule.shouldSuppressSprintRestart())
+            return;
         if (getServerSprintState(player) == startSprinting)
             return;
         try {
@@ -1801,8 +1833,8 @@ public final class McAccess {
             Class<?> entityCls = gameClass("net.minecraft.entity.Entity");
             Object packet = newInstance("net.minecraft.network.play.client.C0BPacketEntityAction",
                     new Class<?>[] { entityCls, actionEnum }, player, action);
-            if (packet != null) {
-                gnu.client.runtime.packet.PacketUtil.sendPacket(packet);
+            if (packet != null && !AuraCombatPacketGuard.shouldCancelEntityAction(packet)) {
+                addToSendQueue(packet);
                 setServerSprintState(player, startSprinting);
             }
         } catch (Throwable t) {

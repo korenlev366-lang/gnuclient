@@ -51,11 +51,20 @@ final class RavenRotationUtils {
         Object bb = expandedBox(entity);
         if (eye == null || bb == null)
             return Double.MAX_VALUE;
+        if (isVecInside(bb, eye[0], eye[1], eye[2]))
+            return 0.0;
         double[] closest = closestPointOnAabb(eye[0], eye[1], eye[2], bb);
         double dx = eye[0] - closest[0];
         double dy = eye[1] - closest[1];
         double dz = eye[2] - closest[2];
         return dx * dx + dy * dy + dz * dz;
+    }
+
+    /** OpenMyau {@code RotationUtil.angleToEntity} — eye inside expanded AABB → always in FOV. */
+    static boolean isEyeInsideExpandedHitbox(Object entity) {
+        double[] eye = eyePos(McAccess.thePlayer(), 1.0f);
+        Object bb = expandedBox(entity);
+        return eye != null && bb != null && isVecInside(bb, eye[0], eye[1], eye[2]);
     }
 
     static double aimDifference(Object entity, float baseYaw) {

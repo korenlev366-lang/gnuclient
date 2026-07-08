@@ -186,10 +186,11 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         currentTarget = findTarget(player, world);
 
         // ── Input state ───────────────────────────────────────────────────
-        // AutoClicker counts as LMB held when enabled (physical LMB also counts).
+        // AutoClicker / KillAura count as LMB held (raven-bS parity).
         boolean clickSourceActive = isClickSourceActive();
+        boolean killAuraAttacking = isKillAuraAttacking(currentTarget);
         boolean rmbDown = McAccess.isPhysicalRmbDown();
-        boolean lmbDown = McAccess.isPhysicalLmbDown() || clickSourceActive;
+        boolean lmbDown = McAccess.isPhysicalLmbDown() || clickSourceActive || killAuraAttacking;
 
         // ── Raven-bS flow ─────────────────────────────────────────────────
         if (!rmbDown && requireRmb.getValue()) {
@@ -453,6 +454,10 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
 
         double rangeSq = range.getValue() * range.getValue();
 
+        Object killAuraTarget = KillAuraModule.getCurrentTarget();
+        if (killAuraTarget != null && isValidTarget(killAuraTarget, player, rangeSq))
+            return killAuraTarget;
+
         // 1. Check mouse-over target first (raven-bS priority)
         Object mop = McAccess.objectMouseOver();
         if (mop != null) {
@@ -522,8 +527,9 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         if (findTarget(player, world) == null)
             return false;
         boolean clickSourceActive = isClickSourceActive();
+        boolean killAuraAttacking = isKillAuraAttacking(findTarget(player, world));
         boolean rmbDown = McAccess.isPhysicalRmbDown();
-        boolean lmbDown = McAccess.isPhysicalLmbDown() || clickSourceActive;
+        boolean lmbDown = McAccess.isPhysicalLmbDown() || clickSourceActive || killAuraAttacking;
         if (requireRmb.getValue() && !rmbDown)
             return false;
         if (!lmbDown)
@@ -551,8 +557,16 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
     }
 
     private static boolean isClickSourceActive() {
-        Module ac = ModuleManager.INSTANCE.getModule("AutoClicker");
-        return ac instanceof AutoClickerModule && ac.isEnabled();
+        Module autoClicker = ModuleManager.INSTANCE.getModule("AutoClicker");
+        return autoClicker instanceof AutoClickerModule && autoClicker.isEnabled();
+    }
+
+    /** Raven-bS: KillAura enabled with a target counts as LMB for require-LMB. */
+    private static boolean isKillAuraAttacking(Object target) {
+        if (target == null)
+            return false;
+        Module killAura = ModuleManager.INSTANCE.getModule("KillAura");
+        return killAura instanceof KillAuraModule && killAura.isEnabled();
     }
 
     // ── Blocking control ──────────────────────────────────────────────────
@@ -608,9 +622,20 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
 
     // ── Public query ──────────────────────────────────────────────────────
 
+    /** True when KillAura should skip swingItem — AutoBlock injects C0A on the C02 hook. */
+    public boolean killAuraShouldDeferSwing() {
+        if (!isEnabled() || !preventDelayAttacks.getValue())
+            return false;
+        return isActive() || isLagging;
+    }
+
     /** Checked by WTapModule / KillAura to suppress C0A swings during lag. */
     public boolean isLagging() {
         return isLagging;
+    }
+
+    public boolean isHoldThroughLag() {
+        return holdThroughLag.getValue();
     }
 
     /** Checked by KillAura / VanillaModuleDriver to know if blocking is active. */
@@ -618,13 +643,12 @@ public final class AutoBlockModule extends Module implements gnu.client.runtime.
         return isEnabled() && (isBlocking || isLagging);
     }
 
-    /** Called by VanillaModuleDriver.noteAttack to release lag on swing. */
+    /** Called before attack packets — bookkeeping only. Lag drains on C02 {@link #onSend}. */
     public void noteAttack(Object target) {
-        if (!isEnabled() || target == null) return;
+        if (!isEnabled() || target == null)
+            return;
         this.attackedThisTick = true;
         this.lastAttackTick = tickCounter;
-        if (!isLagging || !preventDelayAttacks.getValue()) return;
-        releaseLag();
     }
 
     // ── State reset ───────────────────────────────────────────────────────

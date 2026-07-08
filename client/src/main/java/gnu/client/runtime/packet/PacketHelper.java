@@ -567,6 +567,34 @@ public final class PacketHelper {
         return classNameContains(packet, "C0BPacketEntityAction");
     }
 
+    /** C0B START_SPRINTING / STOP_SPRINTING (Grim BadPacketsX sprint window). */
+    public static boolean isSprintEntityAction(Object packet) {
+        String action = entityActionName(packet);
+        return action != null
+            && (action.contains("START_SPRINTING") || action.contains("STOP_SPRINTING"));
+    }
+
+    public static boolean isStartSprintEntityAction(Object packet) {
+        String action = entityActionName(packet);
+        return action != null && action.contains("START_SPRINTING");
+    }
+
+    /** C0B START_SNEAKING / STOP_SNEAKING (Grim BadPacketsX sneak window). */
+    public static boolean isSneakEntityAction(Object packet) {
+        String action = entityActionName(packet);
+        return action != null
+            && (action.contains("START_SNEAKING") || action.contains("STOP_SNEAKING"));
+    }
+
+    private static String entityActionName(Object packet) {
+        if (!isEntityAction(packet))
+            return null;
+        Object action = McAccess.invokeNamed(packet, "getAction", new Class<?>[0]);
+        if (action == null)
+            action = McAccess.invoke(packet, "func_180763_b", new Class<?>[0]);
+        return action != null ? action.toString() : null;
+    }
+
     public static boolean isPlayerDigging(Object packet) {
         return classNameContains(packet, "C07PacketPlayerDigging");
     }

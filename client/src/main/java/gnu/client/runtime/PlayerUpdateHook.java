@@ -1,5 +1,6 @@
 package gnu.client.runtime;
 
+import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.movement.StasisModule;
 import gnu.client.module.modules.player.ScaffoldModule;
 import gnu.client.runtime.mc.McAccess;
@@ -35,6 +36,7 @@ public final class PlayerUpdateHook {
         clearRotationOverride();
         StasisModule.onPreUpdate(player);
         ScaffoldModule.onPreUpdate(player);
+        KillAuraModule.onPreUpdate(player);
         return false;
     }
 
@@ -65,13 +67,27 @@ public final class PlayerUpdateHook {
     public static void beforeWalkingPlayer(Object player) {
         if (!isLocal(player))
             return;
+        KillAuraModule.onBeforeWalkingPrepare(player);
         if (overrideActive)
             beginRotationSwap(player);
         ScaffoldModule.onBeforeWalkingPlace(player);
+        KillAuraModule.onBeforeWalkingAttack(player);
+    }
+
+    /** True between {@link #beginRotationSwap} and {@code onUpdate} return — rotation sent/will send this tick. */
+    public static boolean isRotationTick() {
+        return pendingRestore;
+    }
+
+    public static boolean hasRotationOverride() {
+        return overrideActive;
     }
 
     /** After {@code onUpdateWalkingPlayer} — reserved for post-walking hooks. */
     public static void onAfterWalkingPlayer(Object player) {
+        if (!isLocal(player))
+            return;
+        KillAuraModule.onPostAttackTick(player);
     }
 
     /** Apply requested silent rotation to the local player before block placement. */
@@ -107,7 +123,13 @@ public final class PlayerUpdateHook {
             McAccess.setFloat(player, "field_70125_A", pendingPitch);
             McAccess.setFloat(player, "field_70126_B", restoredYaw);
             McAccess.setFloat(player, "field_70127_C", pendingPitch);
+
+            if (RotationState.getPriority() == MoveFixUtil.KILLAURA_MOVE_FIX_PRIORITY)
+                RotationState.reset();
+        } else if (RotationState.getPriority() == MoveFixUtil.KILLAURA_MOVE_FIX_PRIORITY) {
+            RotationState.reset();
         }
+        KillAuraModule.onPostAttackTick(player);
         clearRotationOverride();
     }
 

@@ -1,5 +1,6 @@
 package gnu.client.runtime;
 
+import gnu.client.module.modules.combat.KillAuraModule;
 import gnu.client.module.modules.player.BridgeAssistModule;
 import gnu.client.module.modules.player.ScaffoldModule;
 import gnu.client.module.modules.movement.StasisModule;
@@ -15,6 +16,7 @@ public final class MovementInputHook {
     public static void afterUpdatePlayerMoveState(Object movementInput) {
         BridgeAssistModule.patchMovementInput(movementInput);
         ScaffoldModule.patchMovementInput(movementInput);
+        KillAuraModule.patchMovementInput(movementInput);
         ScriptManager.instance().patchMovementInput(movementInput);
         StasisModule.patchPlayerInput(movementInput);
     }

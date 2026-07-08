@@ -5,6 +5,7 @@ import gnu.client.module.Module;
 import gnu.client.module.setting.BoolSetting;
 import gnu.client.module.setting.ModeSetting;
 import gnu.client.module.setting.SliderSetting;
+import gnu.client.runtime.MoveFixUtil;
 import gnu.client.runtime.PlayerUpdateHook;
 import gnu.client.runtime.RotationState;
 import gnu.client.runtime.ScaffoldItemSpoofHook;
@@ -777,7 +778,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
    * Returns null when block aim is too far from bridge preset.
    */
   private Float movementFacingYawIfAligned(Object player) {
-    if (player == null || moveFix.getValue() != MOVEFIX_SILENT || !isForwardPressed())
+    if (player == null || moveFix.getValue() != MOVEFIX_SILENT || !MoveFixUtil.isForwardPressed())
       return null;
     if (isTowerJumpActive(player) || !canRotate)
       return null;
@@ -919,7 +920,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
   private boolean usesMovingMoveFix(Object player) {
     return player != null
         && moveFix.getValue() == MOVEFIX_SILENT
-        && isForwardPressed()
+        && MoveFixUtil.isForwardPressed()
         && rotationMode.getValue() != ROT_NONE;
   }
 
@@ -1493,7 +1494,7 @@ public final class ScaffoldModule extends Module implements PacketListener {
   }
 
   private boolean isServerForwardMoving() {
-    if (!isForwardPressed())
+    if (!MoveFixUtil.isForwardPressed())
       return false;
     if (moveFix.getValue() != MOVEFIX_SILENT || !RotationState.isActived())
       return true;
@@ -1521,18 +1522,10 @@ public final class ScaffoldModule extends Module implements PacketListener {
     return sprintMode.getValue() == SPRINT_NONE;
   }
 
-  /**
-   * Movefix sends a server yaw that can face backwards while the player moves where
-   * they look. Sprinting with that server-facing triggers Grim — suppress it.
-   */
   private boolean shouldSuppressSprintForBackwardsServerLook() {
-    if (moveFix.getValue() != MOVEFIX_SILENT || !RotationState.isActived())
+    if (moveFix.getValue() != MOVEFIX_SILENT)
       return false;
-    if (RotationState.getPriority() != (int) ROTATION_PRIORITY || !isForwardPressed())
-      return false;
-    float cameraYaw = McAccess.getYaw();
-    float serverYaw = RotationState.getSmoothedYaw();
-    return Math.abs(ScaffoldPlacement.wrapAngle(cameraYaw - serverYaw)) > 90.0f;
+    return MoveFixUtil.shouldSuppressSprintForBackwardsLook((int) ROTATION_PRIORITY);
   }
 
   private boolean isTellyResetSprintWindow(Object player) {
@@ -1558,12 +1551,11 @@ public final class ScaffoldModule extends Module implements PacketListener {
     float strafe = McAccess.getFloat(movInput, "field_78902_a");
     if (scaffold != null
         && scaffold.moveFix.getValue() == MOVEFIX_SILENT
-        && RotationState.isActived()
-        && RotationState.getPriority() == (int) ROTATION_PRIORITY
+        && MoveFixUtil.hasMoveFixPriority((int) ROTATION_PRIORITY)
         && !tellyForwardMoveFixSkip
-        && isForwardPressed()) {
+        && MoveFixUtil.isForwardPressed()) {
       // Client look (camera yaw + keys) → server-relative input for silent yaw.
-      float[] fixed = fixStrafe(McAccess.getYaw(), RotationState.getSmoothedYaw(), sneak);
+      float[] fixed = MoveFixUtil.fixStrafe(McAccess.getYaw(), RotationState.getSmoothedYaw(), sneak);
       forward = fixed[0];
       strafe = fixed[1];
       if (scaffold.shouldSuppressSprintForBackwardsServerLook()) {
@@ -1583,57 +1575,6 @@ public final class ScaffoldModule extends Module implements PacketListener {
     McAccess.setBool(movInput, "field_78901_c", jump);
     McAccess.setFloat(movInput, "field_78900_b", forward);
     McAccess.setFloat(movInput, "field_78902_a", strafe);
-  }
-
-  /** OpenMyau {@code MoveUtil.fixStrafe} — 8-direction input, ±1 only (Grim-safe). */
-  private static float[] fixStrafe(float cameraYaw, float serverYaw, boolean sneak) {
-    int forwardKey = forwardKeyValue();
-    int strafeKey = leftKeyValue();
-    if (forwardKey == 0 && strafeKey == 0)
-      return new float[] {0.0f, 0.0f};
-    float angle = ScaffoldPlacement.wrapAngle(
-        adjustYaw(cameraYaw, forwardKey, strafeKey) - serverYaw + 22.5f);
-    float forward;
-    float strafe;
-    switch (((int) (angle + 180.0f) / 45) % 8) {
-      case 0: forward = -1.0f; strafe = 0.0f; break;
-      case 1: forward = -1.0f; strafe = 1.0f; break;
-      case 2: forward = 0.0f; strafe = 1.0f; break;
-      case 3: forward = 1.0f; strafe = 1.0f; break;
-      case 4: forward = 1.0f; strafe = 0.0f; break;
-      case 5: forward = 1.0f; strafe = -1.0f; break;
-      case 6: forward = 0.0f; strafe = -1.0f; break;
-      case 7: forward = -1.0f; strafe = -1.0f; break;
-      default: forward = 0.0f; strafe = 0.0f; break;
-    }
-    if (sneak) {
-      forward *= 0.3f;
-      strafe *= 0.3f;
-    }
-    return new float[] {forward, strafe};
-  }
-
-  private static boolean isForwardPressed() {
-    return McAccess.isForwardKeyHeld() != McAccess.isBackKeyHeld()
-        || McAccess.isLeftKeyHeld() != McAccess.isRightKeyHeld();
-  }
-
-  private static int forwardKeyValue() {
-    int value = 0;
-    if (McAccess.isForwardKeyHeld())
-      value++;
-    if (McAccess.isBackKeyHeld())
-      value--;
-    return value;
-  }
-
-  private static int leftKeyValue() {
-    int value = 0;
-    if (McAccess.isLeftKeyHeld())
-      value++;
-    if (McAccess.isRightKeyHeld())
-      value--;
-    return value;
   }
 
   private static boolean shouldTowerJumpInput() {
@@ -1687,17 +1628,11 @@ public final class ScaffoldModule extends Module implements PacketListener {
   }
 
   private float currentMoveYaw(Object player) {
-    return adjustYaw(McAccess.getYaw(), forwardValue(), leftValue());
+    return MoveFixUtil.adjustYaw(McAccess.getYaw(), forwardValue(), leftValue());
   }
 
   private static float adjustYaw(float yaw, float forward, float strafe) {
-    if (forward < 0.0f)
-      yaw += 180.0f;
-    if (strafe != 0.0f) {
-      float multiplier = forward == 0.0f ? 1.0f : 0.5f * Math.signum(forward);
-      yaw += -90.0f * multiplier * Math.signum(strafe);
-    }
-    return ScaffoldPlacement.wrapAngle(yaw);
+    return MoveFixUtil.adjustYaw(yaw, forward, strafe);
   }
 
   private int forwardValue() {

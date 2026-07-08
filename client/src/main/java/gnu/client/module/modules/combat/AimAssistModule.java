@@ -135,6 +135,11 @@ public final class AimAssistModule extends Module {
             return;
         }
 
+        if (KillAuraModule.shouldYieldAimAssist()) {
+            hasTarget = false;
+            return;
+        }
+
         // Hover delay: if LMB is not held, stop rotating
         if (!NativeBootstrap.isLeftMouseDown()) {
             hasTarget = false;
